@@ -1,0 +1,9 @@
+/* Toast.css */
+.toast { cursor: default; }
+.toast-message { flex: 1; color: var(--color-text-primary); }
+.toast-close {
+  width: 24px; height: 24px;
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+.toast-close:hover { color: var(--color-text-primary); }
