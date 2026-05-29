@@ -1,0 +1,184 @@
+# =============================================================================
+# NexChat — Docker Compose (Full Stack Orchestration)
+#
+# This file defines ALL services in the NexChat system.
+# Services are added progressively across phases:
+#   Phase 1: postgres + java-service
+#   Phase 3: + go-service
+#   Phase 5: + redis + nginx
+#
+# Usage:
+#   Start all:    docker compose up -d
+#   Start one:    docker compose up -d postgres
+#   Logs:         docker compose logs -f java-service
+#   Stop all:     docker compose down
+#   Wipe volumes: docker compose down -v  (⚠️ destroys all data)
+# =============================================================================
+
+version: '3.9'
+
+services:
+
+  # ===========================================================================
+  # PostgreSQL — Relational Database
+  # ===========================================================================
+  postgres:
+    image: postgres:16-alpine
+    # alpine variant: ~80MB vs ~400MB for the full Debian image.
+    # Production-grade: PostgreSQL 16 is the current major version.
+    container_name: nexchat-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: nexchat
+      POSTGRES_USER: nexchat_user
+      POSTGRES_PASSWORD: nexchat_pass
+      # Pre-create additional databases if needed (we don't need this now)
+      # POSTGRES_MULTIPLE_DATABASES: nexchat_test
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      # host:container — exposes PostgreSQL on the host for local dev tools
+      # (e.g., TablePlus, pgAdmin, psql)
+      # ⚠️ In production, remove this port mapping — DB should not be
+      # accessible from outside the Docker network.
+      - "5432:5432"
+    volumes:
+      # Named volume: persists data across container restarts.
+      # Without this, all DB data is lost when the container stops.
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - nexchat-network
+    healthcheck:
+      # pg_isready checks if PostgreSQL is accepting connections.
+      # The java-service depends_on this health check to avoid starting
+      # before the DB is ready to accept connections.
+      test: ["CMD-SHELL", "pg_isready -U nexchat_user -d nexchat"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # ===========================================================================
+  # Redis — Pub/Sub + Presence Cache (added in Phase 5, stubbed now)
+  # ===========================================================================
+  redis:
+    image: redis:7-alpine
+    container_name: nexchat-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - nexchat-network
+    command: redis-server --appendonly yes
+    # appendonly yes: persistence mode — Redis snapshots data to disk.
+    # Default is RDB (snapshots), AOF is more durable (every write logged).
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # ===========================================================================
+  # Java Spring Boot Service — Auth + REST API
+  # ===========================================================================
+  java-service:
+    build:
+      context: ./java-service
+      dockerfile: ../docker/java-service.Dockerfile
+    container_name: nexchat-java
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      # Database connection
+      DB_HOST: postgres       # Resolves to the postgres container via Docker DNS
+      DB_PORT: 5432
+      DB_NAME: nexchat
+      DB_USERNAME: nexchat_user
+      DB_PASSWORD: nexchat_pass
+      # JWT configuration
+      # ⚠️ PRODUCTION: generate with: openssl rand -base64 64
+      JWT_SECRET: nexchat-super-secret-key-replace-in-production-minimum-32-bytes
+      JWT_ACCESS_EXPIRY: 900000     # 15 minutes
+      JWT_REFRESH_EXPIRY: 604800000 # 7 days
+      # Application settings
+      FRONTEND_URL: http://localhost:5173
+      LOG_LEVEL: INFO
+      SHOW_SQL: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+        # condition: service_healthy means Docker waits for the healthcheck to pass.
+        # Without this, java-service starts immediately and fails because postgres
+        # isn't ready yet. This is the #1 Docker Compose beginner mistake.
+    networks:
+      - nexchat-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/actuator/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+      # start_period: grace period before health checks begin.
+      # Spring Boot can take 30-60s to start — we give it 60s.
+
+  # ===========================================================================
+  # Go WebSocket Service (added in Phase 3)
+  # ===========================================================================
+  # go-service:
+  #   build:
+  #     context: ./go-service
+  #     dockerfile: ../docker/go-service.Dockerfile
+  #   container_name: nexchat-go
+  #   ports:
+  #     - "8081:8081"
+  #   environment:
+  #     REDIS_URL: redis:6379
+  #     JAVA_SERVICE_URL: http://java-service:8080
+  #     JWT_SECRET: nexchat-super-secret-key-replace-in-production-minimum-32-bytes
+  #   depends_on:
+  #     redis:
+  #       condition: service_healthy
+  #     java-service:
+  #       condition: service_healthy
+  #   networks:
+  #     - nexchat-network
+
+  # ===========================================================================
+  # Nginx Reverse Proxy (added in Phase 5)
+  # ===========================================================================
+  # nginx:
+  #   image: nginx:alpine
+  #   container_name: nexchat-nginx
+  #   ports:
+  #     - "80:80"
+  #   volumes:
+  #     - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+  #   depends_on:
+  #     - java-service
+  #     - go-service
+  #   networks:
+  #     - nexchat-network
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  nexchat-network:
+    driver: bridge
+    # Bridge network: containers on the same network can communicate by
+    # container name (e.g., postgres, java-service). Perfect for a single-host setup.
+    # For multi-host (Kubernetes, Docker Swarm), use overlay networks.
+
+# =============================================================================
+# Volumes
+# =============================================================================
+volumes:
+  postgres_data:
+    driver: local
+    # Named volumes persist beyond container lifecycle.
+    # `docker compose down` removes containers but NOT volumes.
+    # `docker compose down -v` removes both.
+  redis_data:
+    driver: local

@@ -40,14 +40,18 @@
     </description>
 
     <properties>
-        <!-- Java 21 — LTS release with virtual threads (Project Loom).
-             Spring Boot 3.3 fully supports Java 21.
-             ⚠️ Never use Java 8/11 for new Spring Boot 3.x projects. -->
-        <java.version>21</java.version>
+        <!-- Java 23 — Available LTS candidate. Spring Boot 3.3 supports Java 21+.
+             We use 23 because that is what is installed on this system.
+             Java 26 is too cutting-edge for Lombok's annotation processor.
+             In production, Java 21 LTS is the recommended choice. -->
+        <java.version>23</java.version>
 
         <!-- JJWT (Java JWT) — the industry-standard JWT library.
              We pin the version here to override the BOM's managed version. -->
         <jjwt.version>0.12.5</jjwt.version>
+
+        <!-- Lombok 1.18.34+ supports Java 22-26 annotation processing -->
+        <lombok.version>1.18.36</lombok.version>
 
         <!-- Bucket4j — in-memory rate limiting using token bucket algorithm.
              No Redis needed for single-instance rate limiting. -->
@@ -249,6 +253,7 @@
         <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>
+            <version>${lombok.version}</version>
             <optional>true</optional>
         </dependency>
 
@@ -322,6 +327,32 @@
              | The <excludes> block prevents Lombok from being bundled in the
              | final JAR — we only needed it at compile time.
             -->
+            <!--
+             | Maven Compiler Plugin — explicit annotation processor configuration.
+             | Java 22+ changed how annotation processors are discovered.
+             | We must explicitly list Lombok as an annotation processor path
+             | to ensure @Getter, @Slf4j, @Builder etc. are processed correctly.
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <source>${java.version}</source>
+                    <target>${java.version}</target>
+                    <annotationProcessorPaths>
+                        <path>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                            <version>${lombok.version}</version>
+                        </path>
+                    </annotationProcessorPaths>
+                    <compilerArgs>
+                        <arg>--enable-preview</arg>
+                    </compilerArgs>
+                    <enablePreview>true</enablePreview>
+                </configuration>
+            </plugin>
+
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
@@ -332,6 +363,7 @@
                             <artifactId>lombok</artifactId>
                         </exclude>
                     </excludes>
+                    <jvmArguments>--enable-preview</jvmArguments>
                 </configuration>
             </plugin>
         </plugins>

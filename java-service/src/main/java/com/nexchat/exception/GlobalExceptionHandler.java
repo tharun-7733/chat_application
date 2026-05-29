@@ -64,11 +64,8 @@ public class GlobalExceptionHandler {
     ) {
         Map<String, String> fieldErrors = new HashMap<>();
 
-        // getBindingResult() contains all validation failures from this request
         exception.getBindingResult().getAllErrors().forEach(error -> {
-            // Cast to FieldError to get the field name (vs. global/object-level errors)
             String fieldName = ((FieldError) error).getField();
-            // getDefaultMessage() returns our @NotBlank(message = "...") custom message
             String errorMessage = error.getDefaultMessage();
             fieldErrors.put(fieldName, errorMessage);
         });
@@ -77,9 +74,11 @@ public class GlobalExceptionHandler {
 
         return ResponseEntity
             .status(HttpStatus.BAD_REQUEST)
-            .body(ApiResponse.error("Validation failed"));
-        // Note: we're returning the field errors map as data, but ApiResponse.error()
-        // doesn't accept data. Let's use a custom build:
+            .body(ApiResponse.<Map<String, String>>builder()
+                .success(false)
+                .message("Validation failed")
+                .data(fieldErrors)
+                .build());
     }
 
     /**

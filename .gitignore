@@ -1,0 +1,42 @@
+# =============================================================================
+# NexChat .gitignore
+# =============================================================================
+
+# Maven
+target/
+*.class
+*.jar
+*.war
+
+# IDE files
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+*.swp
+*.swo
+
+# Environment files — NEVER commit secrets
+.env
+.env.local
+.env.production
+
+# OS generated
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Node (for frontend)
+node_modules/
+dist/
+.next/
+
+# Go
+go-service/vendor/
+
+# Docker overrides
+docker-compose.override.yml
