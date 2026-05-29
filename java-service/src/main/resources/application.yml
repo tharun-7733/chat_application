@@ -1,0 +1,155 @@
+# =============================================================================
+# NexChat Java Service — Application Configuration
+#
+# ALL secrets and environment-specific values are read from environment variables.
+# Local defaults are provided for development convenience ONLY.
+# Never commit real secrets to this file.
+#
+# Pattern: ${ENV_VAR_NAME:default_value}
+#   - In production (Docker): set ENV_VAR_NAME in docker-compose.yml
+#   - Locally: defaults are used, or create a .env file and source it
+# =============================================================================
+
+server:
+  port: ${SERVER_PORT:8080}
+  # Tomcat error handling: disable the default whitelabel error page.
+  # Our GlobalExceptionHandler will produce all error responses.
+  error:
+    whitelabel:
+      enabled: false
+
+spring:
+  application:
+    name: nexchat-java-service
+
+  # ---------------------------------------------------------------------------
+  # DATASOURCE (PostgreSQL)
+  # ---------------------------------------------------------------------------
+  datasource:
+    # JDBC URL format: jdbc:postgresql://<host>:<port>/<database>
+    # In Docker Compose, 'postgres' resolves to the PostgreSQL container hostname.
+    # Locally, use 'localhost'.
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:nexchat}
+    username: ${DB_USERNAME:nexchat_user}
+    password: ${DB_PASSWORD:nexchat_pass}
+    driver-class-name: org.postgresql.Driver
+
+    # HikariCP Connection Pool (Spring Boot's default, and the best)
+    # ⚠️ PRODUCTION CRITICAL: Pool sizing matters enormously.
+    # Rule of thumb for CPU-bound work: pool_size = (num_cores * 2) + 1
+    # For I/O-bound work (DB queries): you can go higher, but always benchmark.
+    hikari:
+      pool-name: NexChat-HikariPool
+      maximum-pool-size: ${DB_POOL_SIZE:10}
+      minimum-idle: 2
+      # How long to wait for a connection from the pool before throwing.
+      # 30 seconds is generous — tune this down in high-throughput scenarios.
+      connection-timeout: 30000
+      # Connections idle longer than this are removed from the pool.
+      idle-timeout: 600000
+      # Max lifetime of a connection in the pool, regardless of idle status.
+      # Keep below your DB's wait_timeout (MySQL) or tcp_keepalives (PostgreSQL).
+      max-lifetime: 1800000
+
+  # ---------------------------------------------------------------------------
+  # JPA / HIBERNATE
+  # ---------------------------------------------------------------------------
+  jpa:
+    # ⚠️ PRODUCTION RULE: NEVER use 'create', 'create-drop', or 'update' in prod.
+    # 'validate' makes Hibernate verify the schema matches your entities at startup.
+    # If there's a mismatch, the app fails fast — better than silent data corruption.
+    # Flyway handles all schema changes; Hibernate is read-only about schema.
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        # Tell Hibernate to use PostgreSQL dialect for query generation.
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        # Log every SQL query to the console in dev. DISABLE in production.
+        # ⚠️ Logging SQL in prod risks logging sensitive data from query params.
+        show_sql: ${SHOW_SQL:false}
+        format_sql: true
+        # JDBC batch size: Instead of N individual INSERT statements,
+        # Hibernate bundles them into a single batch. Massive performance gain
+        # for bulk inserts. PostgreSQL supports batching.
+        jdbc:
+          batch_size: 25
+        order_inserts: true
+        order_updates: true
+
+  # ---------------------------------------------------------------------------
+  # FLYWAY (Database Migrations)
+  # ---------------------------------------------------------------------------
+  flyway:
+    enabled: true
+    # Where Flyway looks for migration SQL scripts.
+    # Convention: classpath:db/migration → src/main/resources/db/migration/
+    locations: classpath:db/migration
+    # Flyway tracks migrations in a table called flyway_schema_history.
+    # baseline-on-migrate: if you have an existing DB without Flyway history,
+    # this tells Flyway "treat everything before my first migration as baseline".
+    # For a fresh DB, this is irrelevant but good to have.
+    baseline-on-migrate: true
+
+# ---------------------------------------------------------------------------
+# CUSTOM APPLICATION PROPERTIES
+# These are read by our @ConfigurationProperties or @Value beans.
+# ---------------------------------------------------------------------------
+nexchat:
+  jwt:
+    # ⚠️ SECURITY CRITICAL: Use a minimum 256-bit (32-byte) secret key.
+    # In production, generate with: openssl rand -base64 64
+    # Never use short, guessable secrets. Never commit real secrets.
+    secret: ${JWT_SECRET:nexchat-super-secret-key-for-development-only-change-in-prod}
+    # Access token: short-lived. If stolen, attacker has limited time window.
+    access-token-expiration: ${JWT_ACCESS_EXPIRY:900000}    # 15 minutes in ms
+    # Refresh token: longer-lived. Used to get new access tokens.
+    # Stored server-side in the sessions table so it CAN be revoked.
+    refresh-token-expiration: ${JWT_REFRESH_EXPIRY:604800000} # 7 days in ms
+
+  rate-limit:
+    # Login endpoint: 5 attempts per minute before lockout.
+    # This prevents brute-force attacks on passwords.
+    auth-requests-per-minute: ${AUTH_RATE_LIMIT:5}
+
+# ---------------------------------------------------------------------------
+# ACTUATOR (Monitoring & Health Checks)
+# ---------------------------------------------------------------------------
+management:
+  endpoints:
+    web:
+      # Only expose health and info publicly. Never expose 'env' or 'beans'
+      # in production — they leak sensitive configuration data.
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      # 'always' shows detailed health info. In production, use 'when_authorized'.
+      show-details: ${HEALTH_SHOW_DETAILS:always}
+  info:
+    env:
+      enabled: true
+
+# Application metadata shown at /actuator/info
+info:
+  app:
+    name: NexChat Java Service
+    version: 1.0.0
+    description: Authentication and REST API service for NexChat
+
+# ---------------------------------------------------------------------------
+# LOGGING
+# ---------------------------------------------------------------------------
+logging:
+  level:
+    # Our application code: DEBUG in dev, INFO in prod (set via env var)
+    com.nexchat: ${LOG_LEVEL:DEBUG}
+    # Spring Security: DEBUG is very verbose — shows every filter decision.
+    # Useful during development; always INFO or WARN in production.
+    org.springframework.security: ${SECURITY_LOG_LEVEL:INFO}
+    # Hibernate SQL logging (separate from show_sql above — this shows params)
+    org.hibernate.SQL: ${SQL_LOG_LEVEL:INFO}
+  pattern:
+    # Structured log format: timestamp | level | thread | class | message
+    # In production, use JSON format with Logback JSON encoder (Phase 6).
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"

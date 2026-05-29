@@ -1,0 +1,340 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+         https://maven.apache.org/xsd/maven-4.0.0.xsd">
+
+    <modelVersion>4.0.0</modelVersion>
+
+    <!--
+     | Spring Boot Parent BOM (Bill of Materials)
+     | This is NOT just a parent pom — it's a version manager.
+     | Every dependency listed below gets its version from here,
+     | unless you explicitly override. This prevents dependency hell.
+     |
+     | ⚠️ INTERVIEW QUESTION: "Why do we use spring-boot-starter-parent?"
+     |   Answer: It provides dependency management (version alignment),
+     |   plugin management (maven-compiler-plugin, surefire, etc.),
+     |   and sensible defaults. It does NOT add dependencies to your project.
+    -->
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>3.3.0</version>
+        <relativePath/>
+    </parent>
+
+    <!-- ================================================================
+     | Project Coordinates
+     | groupId   → reverse domain, uniquely identifies your organization
+     | artifactId → the specific project/module name
+     | version   → SNAPSHOT means "in development, not released"
+     ================================================================ -->
+    <groupId>com.nexchat</groupId>
+    <artifactId>nexchat-java-service</artifactId>
+    <version>0.0.1-SNAPSHOT</version>
+    <name>NexChat Java Service</name>
+    <description>
+        NexChat authentication and REST API microservice.
+        Handles user management, JWT auth, friend system, and message persistence.
+    </description>
+
+    <properties>
+        <!-- Java 21 — LTS release with virtual threads (Project Loom).
+             Spring Boot 3.3 fully supports Java 21.
+             ⚠️ Never use Java 8/11 for new Spring Boot 3.x projects. -->
+        <java.version>21</java.version>
+
+        <!-- JJWT (Java JWT) — the industry-standard JWT library.
+             We pin the version here to override the BOM's managed version. -->
+        <jjwt.version>0.12.5</jjwt.version>
+
+        <!-- Bucket4j — in-memory rate limiting using token bucket algorithm.
+             No Redis needed for single-instance rate limiting. -->
+        <bucket4j.version>8.10.1</bucket4j.version>
+    </properties>
+
+    <dependencies>
+
+        <!-- ============================================================
+         | CORE WEB LAYER
+         ============================================================ -->
+
+        <!--
+         | spring-boot-starter-web
+         | What it gives you: Tomcat (embedded), Spring MVC, Jackson (JSON),
+         |   validation, and all the wiring to serve HTTP requests.
+         | Why embedded Tomcat: In a distributed system, you want your
+         |   service to be self-contained — no WAR deployments to app servers.
+         |   This is the "fat JAR" / "executable JAR" pattern.
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+
+        <!--
+         | spring-boot-starter-validation
+         | Enables @Valid, @NotBlank, @Email, @Size, etc. on DTOs.
+         | Uses Hibernate Validator (JSR-380) under the hood.
+         | Without this: you'd have to write manual null checks everywhere.
+         |
+         | ⚠️ GOTCHA: This is NOT included in spring-boot-starter-web.
+         |   Many beginners forget this and wonder why @Valid does nothing.
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
+        </dependency>
+
+        <!-- ============================================================
+         | SECURITY LAYER
+         ============================================================ -->
+
+        <!--
+         | spring-boot-starter-security
+         | What it gives you: Spring Security 6 (for Boot 3.x).
+         |   - Authentication + Authorization framework
+         |   - CSRF protection (we'll disable for stateless JWT API)
+         |   - Automatic password encoding support
+         |   - SecurityFilterChain DSL
+         |
+         | ⚠️ GOTCHA: Adding this dependency immediately locks down ALL
+         |   endpoints with HTTP Basic Auth and a generated password.
+         |   Your very next task is always to configure SecurityConfig.
+         |
+         | ⚠️ INTERVIEW QUESTION: "Spring Security 5 vs 6 differences?"
+         |   Answer: Spring Security 6 removed WebSecurityConfigurerAdapter
+         |   (deprecated in 5.7). You now use @Bean SecurityFilterChain.
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-security</artifactId>
+        </dependency>
+
+        <!-- ============================================================
+         | JWT (JSON Web Tokens)
+         | We use JJWT — the most battle-tested JWT library for Java.
+         | Split into 3 JARs for modularity:
+         |   - jjwt-api    → the interfaces/contracts you code against
+         |   - jjwt-impl   → the actual implementation (runtime only)
+         |   - jjwt-jackson → JSON serialization/deserialization of claims
+         |
+         | ⚠️ ARCHITECTURE DECISION: Why JWT over sessions?
+         |   Sessions require sticky sessions or shared session store
+         |   (Redis) in distributed systems. JWTs are self-contained —
+         |   any instance can validate them without hitting a DB.
+         |   Tradeoff: JWTs can't be revoked before expiry (we handle
+         |   this with refresh tokens + short-lived access tokens).
+        -->
+        <dependency>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-api</artifactId>
+            <version>${jjwt.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-impl</artifactId>
+            <version>${jjwt.version}</version>
+            <!--
+             | runtime scope: not needed at compile time (you code against
+             | jjwt-api interfaces), but present at runtime execution.
+             | This is good practice — code against interfaces, not impls.
+            -->
+            <scope>runtime</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-jackson</artifactId>
+            <version>${jjwt.version}</version>
+            <scope>runtime</scope>
+        </dependency>
+
+        <!-- ============================================================
+         | DATA LAYER
+         ============================================================ -->
+
+        <!--
+         | spring-boot-starter-data-jpa
+         | What it gives you:
+         |   - Hibernate (JPA implementation)
+         |   - Spring Data JPA (repository abstractions)
+         |   - Transaction management
+         |   - EntityManager, criteria queries
+         |
+         | ⚠️ INTERVIEW QUESTION: "JPA vs Hibernate vs Spring Data JPA?"
+         |   JPA: specification (interface, no code)
+         |   Hibernate: implementation of JPA spec
+         |   Spring Data JPA: abstraction ON TOP of Hibernate that auto-
+         |     generates implementations for repository interfaces.
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-jpa</artifactId>
+        </dependency>
+
+        <!--
+         | PostgreSQL JDBC Driver
+         | runtime scope: your code never imports PostgreSQL classes.
+         | You write standard JPA/JDBC code; PostgreSQL driver is loaded
+         | dynamically at runtime by the JDBC DriverManager.
+         | This is the Driver pattern — keeps your code DB-agnostic.
+        -->
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+
+        <!--
+         | Flyway — Database Migration Tool
+         | What it does: Manages DB schema evolution via versioned SQL scripts.
+         | Why not just use Hibernate's ddl-auto=create-drop?
+         |   - Hibernate DDL is for dev only — it can DROP TABLES in prod
+         |   - Flyway gives you a version-controlled, auditable migration history
+         |   - Every migration runs exactly once, tracked in flyway_schema_history
+         |
+         | ⚠️ PRODUCTION RULE: Never use ddl-auto=create or update in production.
+         |   Always use flyway or liquibase for schema management.
+        -->
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-core</artifactId>
+        </dependency>
+        <!--
+         | Flyway needs a database-specific module for PostgreSQL (Flyway 10+).
+         | Without this, Flyway silently fails to find the PostgreSQL dialect.
+        -->
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-database-postgresql</artifactId>
+        </dependency>
+
+        <!-- ============================================================
+         | RATE LIMITING
+         ============================================================ -->
+
+        <!--
+         | Bucket4j — Token Bucket Rate Limiting
+         | Why token bucket? It allows bursts (unlike fixed window) while
+         | still enforcing a long-term rate limit.
+         | Example: 5 requests/minute means 5 tokens. If you use 3, you
+         | have 2 left AND tokens refill continuously, not all at once.
+         |
+         | Alternative: Spring Cloud Gateway has built-in rate limiting,
+         | but that adds a whole new service. For a single service,
+         | in-memory Bucket4j is perfect.
+        -->
+        <dependency>
+            <groupId>com.bucket4j</groupId>
+            <artifactId>bucket4j-core</artifactId>
+            <version>${bucket4j.version}</version>
+        </dependency>
+
+        <!-- ============================================================
+         | DEVELOPER EXPERIENCE
+         ============================================================ -->
+
+        <!--
+         | Lombok — Eliminates boilerplate (getters, setters, constructors,
+         | builders, toString, equals, hashCode).
+         | 
+         | ⚠️ GOTCHA: Lombok is an annotation PROCESSOR, not a runtime dep.
+         |   It generates code at compile time. At runtime, the generated
+         |   code is there; Lombok itself is not needed.
+         | 
+         | ⚠️ TEAM NOTE: Some teams ban Lombok because IDE support varies
+         |   and debugger behavior can be confusing. Know this tradeoff.
+        -->
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <optional>true</optional>
+        </dependency>
+
+        <!--
+         | Spring Boot Actuator — Production monitoring endpoints.
+         | /actuator/health → is the service alive? (used by Docker, K8s)
+         | /actuator/metrics → CPU, memory, JVM stats
+         | /actuator/info → build info, git commit hash
+         |
+         | This is essential for any production service.
+         | We'll expose health checks for Docker Compose health checks.
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+
+        <!-- ============================================================
+         | TESTING
+         ============================================================ -->
+
+        <!--
+         | spring-boot-starter-test
+         | Includes: JUnit 5, Mockito, AssertJ, Spring Test, MockMvc.
+         | test scope: not included in the production JAR.
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <!--
+         | Spring Security Test — Provides @WithMockUser, SecurityMockMvcRequestPostProcessors
+         | Essential for testing secured endpoints without mocking the entire
+         | filter chain manually.
+        -->
+        <dependency>
+            <groupId>org.springframework.security</groupId>
+            <artifactId>spring-security-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <!--
+         | H2 In-Memory Database — Used ONLY in tests.
+         | Allows integration tests to run without a real PostgreSQL instance.
+         | test scope: never in production classpath.
+         |
+         | ⚠️ GOTCHA: H2 has subtle SQL dialect differences from PostgreSQL.
+         |   For critical SQL testing, use Testcontainers with real PostgreSQL.
+         |   We'll add Testcontainers in Phase 6.
+        -->
+        <dependency>
+            <groupId>com.h2database</groupId>
+            <artifactId>h2</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+    </dependencies>
+
+    <build>
+        <plugins>
+            <!--
+             | Spring Boot Maven Plugin
+             | What it does:
+             |   1. Packages app as an executable "fat JAR" (includes all deps)
+             |   2. Provides `mvn spring-boot:run` for local dev
+             |   3. Adds build metadata (git commit, build time) to the JAR
+             |   4. Supports layered JARs for optimized Docker images (Phase 5)
+             |
+             | The <excludes> block prevents Lombok from being bundled in the
+             | final JAR — we only needed it at compile time.
+            -->
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <excludes>
+                        <exclude>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                        </exclude>
+                    </excludes>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+
+</project>
