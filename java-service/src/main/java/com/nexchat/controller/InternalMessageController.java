@@ -67,7 +67,7 @@ public class InternalMessageController {
             .senderId(request.getSenderId())
             .receiverId(request.getReceiverId())
             .content(request.getContent())
-            .messageType("TEXT")
+            .messageType(Message.MessageType.TEXT)
             .build();
 
         Message saved = messageRepository.save(message);

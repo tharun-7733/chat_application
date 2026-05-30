@@ -44,25 +44,17 @@ public class Message {
     @Column(name = "content", nullable = false, columnDefinition = "TEXT")
     private String content;
 
-    // Stored as a string that matches the PostgreSQL 'message_type' enum values.
-    // We don't use @Enumerated(EnumType.STRING) directly because Hibernate 6
-    // doesn't auto-cast String → custom PostgreSQL enum. Instead we use
-    // @JdbcTypeCode(Types.OTHER) annotation-free approach: just a plain String
-    // with the column declared as message_type so PostgreSQL does the implicit cast.
+    @Enumerated(EnumType.STRING)
+    @org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.NAMED_ENUM)
     @Column(name = "message_type", nullable = false, columnDefinition = "message_type")
     @Builder.Default
-    private String messageType = "TEXT";
+    private MessageType messageType = MessageType.TEXT;
 
     /**
-     * Message type constants matching the PostgreSQL 'message_type' enum.
+     * Message type enum matching the PostgreSQL 'message_type' enum.
      */
-    public static final class MessageType {
-        public static final String TEXT = "TEXT";
-        public static final String IMAGE = "IMAGE";
-        public static final String FILE = "FILE";
-        public static final String VOICE = "VOICE";
-        public static final String SYSTEM = "SYSTEM";
-        private MessageType() {}
+    public enum MessageType {
+        TEXT, IMAGE, FILE, VOICE, SYSTEM
     }
 
     @Column(name = "is_read", nullable = false)
@@ -85,10 +77,4 @@ public class Message {
         }
     }
 
-    /**
-     * Message type enum matching the PostgreSQL 'message_type' enum.
-     */
-    public enum MessageType {
-        TEXT, IMAGE, FILE, VOICE, SYSTEM
-    }
 }
