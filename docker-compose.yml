@@ -124,26 +124,35 @@ services:
       # Spring Boot can take 30-60s to start — we give it 60s.
 
   # ===========================================================================
-  # Go WebSocket Service (added in Phase 3)
+  # Go WebSocket Service — Real-time relay + Redis Pub/Sub
   # ===========================================================================
-  # go-service:
-  #   build:
-  #     context: ./go-service
-  #     dockerfile: ../docker/go-service.Dockerfile
-  #   container_name: nexchat-go
-  #   ports:
-  #     - "8081:8081"
-  #   environment:
-  #     REDIS_URL: redis:6379
-  #     JAVA_SERVICE_URL: http://java-service:8080
-  #     JWT_SECRET: nexchat-super-secret-key-replace-in-production-minimum-32-bytes
-  #   depends_on:
-  #     redis:
-  #       condition: service_healthy
-  #     java-service:
-  #       condition: service_healthy
-  #   networks:
-  #     - nexchat-network
+  go-service:
+    build:
+      context: ./go-service
+      dockerfile: ../docker/go-service.Dockerfile
+    container_name: nexchat-go
+    restart: unless-stopped
+    ports:
+      - "8081:8081"
+    environment:
+      PORT: "8081"
+      JWT_SECRET: nexchat-super-secret-key-replace-in-production-minimum-32-bytes
+      REDIS_URL: redis:6379
+      JAVA_SERVICE_URL: http://java-service:8080
+      INTERNAL_SECRET: nexchat-internal-dev-secret
+    depends_on:
+      redis:
+        condition: service_healthy
+      java-service:
+        condition: service_healthy
+    networks:
+      - nexchat-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8081/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
   # ===========================================================================
   # Nginx Reverse Proxy (added in Phase 5)

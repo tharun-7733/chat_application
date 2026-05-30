@@ -222,7 +222,7 @@ export default function ChatPage() {
                       <MessageBubble
                         key={msg.id}
                         message={msg}
-                        isSent={msg.senderId === 'me'}
+                        isSent={msg.senderId === user?.id}
                         senderName={activeContact.username}
                       />
                     ))}

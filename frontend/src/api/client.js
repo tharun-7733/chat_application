@@ -59,6 +59,7 @@ export const authApi = {
 export const userApi = {
   me: () => api.get('/api/users/me'),
   getById: (id) => api.get(`/api/users/${id}`),
+  search: (q = '') => api.get('/api/users/search', { params: { q } }),
 };
 
 export default api;

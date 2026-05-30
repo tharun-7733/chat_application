@@ -21,9 +21,9 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
-import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -50,19 +50,13 @@ public class UserController {
      */
     @GetMapping("/me")
     public ResponseEntity<ApiResponse<Map<String, Object>>> getCurrentUser(
-        @AuthenticationPrincipal UserDetails userDetails
+        @AuthenticationPrincipal User currentUser
     ) {
         /*
-         * Cast UserDetails to our User entity.
-         * This is safe because JwtAuthFilter loads users via UserDetailsServiceImpl,
-         * which returns User entities (which implement UserDetails).
-         *
-         * ⚠️ If you use a different UserDetails implementation in the future,
-         *   this cast will throw ClassCastException. Consider a custom principal
-         *   class or a service method that loads by ID.
+         * @AuthenticationPrincipal injects the User entity directly since
+         * JwtAuthFilter places a User (which implements UserDetails) into
+         * the SecurityContext. No cast needed.
          */
-        User currentUser = (User) userDetails;
-
         log.debug("Profile requested for user: {}", currentUser.getId());
 
         Map<String, Object> profile = Map.of(
@@ -108,5 +102,34 @@ public class UserController {
             .orElseGet(() -> ResponseEntity.status(404).body(
                 ApiResponse.error("User not found")
             ));
+    }
+
+    /**
+     * GET /api/users/search?q=alice
+     *
+     * Case-insensitive username search. Returns all users if q is empty.
+     * Excludes the authenticated user from results.
+     */
+    @GetMapping("/search")
+    public ResponseEntity<ApiResponse<List<Map<String, Object>>>> searchUsers(
+        @RequestParam(name = "q", defaultValue = "") String query,
+        @AuthenticationPrincipal User currentUser
+    ) {
+        List<User> users = query.isBlank()
+            ? userRepository.findAllExcept(currentUser.getId())
+            : userRepository.searchByUsername(query, currentUser.getId());
+
+        List<Map<String, Object>> responses = users.stream()
+            .map(u -> Map.<String, Object>of(
+                "id", u.getId().toString(),
+                "username", u.getUsername(),
+                "email", u.getEmail(),
+                "avatarUrl", u.getAvatarUrl() != null ? u.getAvatarUrl() : "",
+                "statusMessage", u.getStatusMessage() != null ? u.getStatusMessage() : "",
+                "lastSeen", u.getLastSeen() != null ? u.getLastSeen().toString() : ""
+            ))
+            .toList();
+
+        return ResponseEntity.ok(ApiResponse.success("Users found", responses));
     }
 }

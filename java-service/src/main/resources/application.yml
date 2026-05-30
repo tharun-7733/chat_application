@@ -112,6 +112,11 @@ nexchat:
     # This prevents brute-force attacks on passwords.
     auth-requests-per-minute: ${AUTH_RATE_LIMIT:5}
 
+  internal:
+    # Shared secret for Go→Java internal service calls (X-Internal-Token header).
+    # Must match INTERNAL_SECRET env var in the Go WebSocket service.
+    secret: ${INTERNAL_SECRET:nexchat-internal-dev-secret}
+
 # ---------------------------------------------------------------------------
 # ACTUATOR (Monitoring & Health Checks)
 # ---------------------------------------------------------------------------

@@ -22,6 +22,7 @@ import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -82,5 +83,27 @@ public interface UserRepository extends JpaRepository<User, UUID> {
     int updateLastSeen(
         @Param("userId") UUID userId,
         @Param("lastSeen") Instant lastSeen
+    );
+
+    /**
+     * Returns all users except the current user.
+     * Used to populate the contacts sidebar when no search query is provided.
+     * Ordered by username for consistent display.
+     */
+    @Query("SELECT u FROM User u WHERE u.id <> :excludeId ORDER BY u.username ASC")
+    List<User> findAllExcept(@Param("excludeId") UUID excludeId);
+
+    /**
+     * Case-insensitive username prefix search.
+     * Uses LOWER() + LIKE for portability across DBs.
+     * PostgreSQL's ILIKE would be faster, but JPQL LOWER+LIKE works on all JPA providers.
+     *
+     * @param query     The search string (partial username)
+     * @param excludeId The current user's ID — exclude from results
+     */
+    @Query("SELECT u FROM User u WHERE LOWER(u.username) LIKE LOWER(CONCAT('%', :query, '%')) AND u.id <> :excludeId ORDER BY u.username ASC")
+    List<User> searchByUsername(
+        @Param("query") String query,
+        @Param("excludeId") UUID excludeId
     );
 }

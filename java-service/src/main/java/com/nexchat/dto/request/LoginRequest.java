@@ -26,7 +26,7 @@ public class LoginRequest {
      * compared against the stored BCrypt hash. Rejecting it for not meeting
      * "current" complexity rules would lock out users with old passwords.
      *
-     * ⚠️ SECURITY: We still validate @NotBlank to prevent empty-string
+     *   SECURITY: We still validate @NotBlank to prevent empty-string
      *   auth bypass attempts.
      */
     @NotBlank(message = "Password is required")

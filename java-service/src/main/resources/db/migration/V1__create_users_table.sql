@@ -15,7 +15,7 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 CREATE TABLE users (
     -- UUID primary key: globally unique, not sequential.
-    -- ⚠️ ARCHITECTURE DECISION: UUID vs BIGSERIAL?
+    -- ARCHITECTURE DECISION: UUID vs BIGSERIAL?
     --   BIGSERIAL: smaller (8 bytes), faster index lookups, but sequential —
     --     an attacker can enumerate user IDs (user/1, user/2...).
     --   UUID: larger (16 bytes), but opaque — safe to expose in URLs/APIs.
@@ -27,7 +27,7 @@ CREATE TABLE users (
 
     -- We store a BCrypt hash, NOT the password.
     -- BCrypt hash is always 60 characters. VARCHAR(60) is an exact fit.
-    -- ⚠️ NEVER store plaintext passwords. Ever. Under any circumstances.
+    -- NEVER store plaintext passwords. Ever. Under any circumstances.
     password_hash   VARCHAR(60)  NOT NULL,
 
     -- URL to profile picture. Nullable — user may not have set one yet.
@@ -42,7 +42,7 @@ CREATE TABLE users (
     last_seen       TIMESTAMP WITH TIME ZONE,
 
     -- WITH TIME ZONE ensures timestamps are stored as UTC in PostgreSQL.
-    -- ⚠️ ALWAYS use TIMESTAMP WITH TIME ZONE (TIMESTAMPTZ) for any timestamp
+    -- ALWAYS use TIMESTAMP WITH TIME ZONE (TIMESTAMPTZ) for any timestamp
     --   that represents an absolute point in time. Never use plain TIMESTAMP —
     --   it's ambiguous and causes silent timezone bugs in distributed systems.
     created_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),

@@ -1,76 +1,51 @@
 // ChatContext — Real-time state for conversations, messages, presence
 // Manages the WebSocket connection lifecycle and message state.
+// Phase 3: Real contacts from API + live WebSocket relay via Go service.
 
 import { createContext, useContext, useReducer, useRef, useCallback, useEffect } from 'react';
 import { useAuth } from './AuthContext';
+import { userApi } from '../api/client';
 
 const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:8081';
 
 const ChatContext = createContext(null);
 
-// ── Demo data so the app looks great before backend is running ──────────────
-const DEMO_CONTACTS = [
-  {
-    id: 'c1', username: 'Sarah Chen', email: 'sarah@example.com',
-    avatarUrl: null, statusMessage: 'Building something amazing 🚀',
-    online: true, lastSeen: new Date().toISOString(),
-  },
-  {
-    id: 'c2', username: 'Alex Rivera', email: 'alex@example.com',
-    avatarUrl: null, statusMessage: 'Coffee & code ☕',
-    online: true, lastSeen: new Date().toISOString(),
-  },
-  {
-    id: 'c3', username: 'Jordan Kim', email: 'jordan@example.com',
-    avatarUrl: null, statusMessage: 'Available for deep work',
-    online: false, lastSeen: new Date(Date.now() - 3600000).toISOString(),
-  },
-  {
-    id: 'c4', username: 'Maya Patel', email: 'maya@example.com',
-    avatarUrl: null, statusMessage: '🎵 In the zone',
-    online: true, lastSeen: new Date().toISOString(),
-  },
-  {
-    id: 'c5', username: 'Liam Foster', email: 'liam@example.com',
-    avatarUrl: null, statusMessage: 'DM me for collabs',
-    online: false, lastSeen: new Date(Date.now() - 86400000).toISOString(),
-  },
-];
-
-function makeDemoMessages(contactId) {
-  const now = Date.now();
-  return [
-    { id: `m1-${contactId}`, senderId: contactId, content: "Hey! How's the NexChat build going?", createdAt: new Date(now - 600000).toISOString(), status: 'read' },
-    { id: `m2-${contactId}`, senderId: 'me', content: 'Really well! Just finished the Java auth service and now setting up the React frontend 🎉', createdAt: new Date(now - 540000).toISOString(), status: 'read' },
-    { id: `m3-${contactId}`, senderId: contactId, content: "That's impressive. What stack are you using?", createdAt: new Date(now - 480000).toISOString(), status: 'read' },
-    { id: `m4-${contactId}`, senderId: 'me', content: 'Spring Boot for auth/REST, Go for WebSockets, Redis for pub/sub, and React for the frontend. It is distributed architecture!', createdAt: new Date(now - 420000).toISOString(), status: 'read' },
-    { id: `m5-${contactId}`, senderId: contactId, content: "Wow that's a proper production setup. You're definitely going to nail those interviews 💪", createdAt: new Date(now - 60000).toISOString(), status: 'delivered' },
-  ];
-}
-
 const initialState = {
-  contacts: DEMO_CONTACTS,
-  messages: {},        // { contactId: Message[] }
+  contacts: [],             // Loaded from GET /api/users/search
+  messages: {},             // { contactId: Message[] }
   activeContactId: null,
-  typingUsers: {},     // { contactId: boolean }
+  typingUsers: {},          // { contactId: boolean }
   wsStatus: 'disconnected', // 'connected' | 'connecting' | 'disconnected'
   searchQuery: '',
+  contactsLoading: false,
+  contactsError: null,
 };
 
 function chatReducer(state, action) {
   switch (action.type) {
     case 'SET_CONTACTS':
-      return { ...state, contacts: action.payload };
+      return { ...state, contacts: action.payload, contactsLoading: false, contactsError: null };
+    case 'SET_CONTACTS_LOADING':
+      return { ...state, contactsLoading: action.payload };
+    case 'SET_CONTACTS_ERROR':
+      return { ...state, contactsError: action.payload, contactsLoading: false };
     case 'SET_ACTIVE_CONTACT':
       return { ...state, activeContactId: action.payload };
     case 'SET_MESSAGES':
       return { ...state, messages: { ...state.messages, [action.contactId]: action.payload } };
     case 'APPEND_MESSAGE': {
       const existing = state.messages[action.contactId] || [];
+      // Deduplicate: replace a temp message with the ack if IDs match
+      const withoutDup = existing.filter(m => m.id !== action.payload.id);
       return {
         ...state,
-        messages: { ...state.messages, [action.contactId]: [...existing, action.payload] },
+        messages: { ...state.messages, [action.contactId]: [...withoutDup, action.payload] },
       };
+    }
+    case 'REPLACE_TEMP_MESSAGE': {
+      const msgs = state.messages[action.contactId] || [];
+      const updated = msgs.map(m => m.id === action.tempId ? action.payload : m);
+      return { ...state, messages: { ...state.messages, [action.contactId]: updated } };
     }
     case 'SET_TYPING':
       return { ...state, typingUsers: { ...state.typingUsers, [action.contactId]: action.isTyping } };
@@ -88,8 +63,38 @@ export function ChatProvider({ children }) {
   const { user, isAuthenticated } = useAuth();
   const wsRef = useRef(null);
   const typingTimerRef = useRef({});
+  // Map from tempId → contactId so we can replace optimistic messages on ack
+  const pendingMessages = useRef({});
 
-  // Connect WebSocket when authenticated
+  // ── Load contacts from API when authenticated ──────────────────────────────
+  useEffect(() => {
+    if (!isAuthenticated || !user) return;
+
+    const loadContacts = async () => {
+      dispatch({ type: 'SET_CONTACTS_LOADING', payload: true });
+      try {
+        const { data } = await userApi.search('');
+        const contacts = (data.data || []).map(u => ({
+          id: u.id,
+          username: u.username,
+          email: u.email,
+          avatarUrl: u.avatarUrl || null,
+          statusMessage: u.statusMessage || null,
+          // Presence will be updated via WebSocket events
+          online: false,
+          lastSeen: u.lastSeen || null,
+        }));
+        dispatch({ type: 'SET_CONTACTS', payload: contacts });
+      } catch (err) {
+        console.error('[chat] failed to load contacts:', err);
+        dispatch({ type: 'SET_CONTACTS_ERROR', payload: 'Failed to load contacts' });
+      }
+    };
+
+    loadContacts();
+  }, [isAuthenticated, user]);
+
+  // ── Connect WebSocket when authenticated ───────────────────────────────────
   useEffect(() => {
     if (!isAuthenticated || !user) return;
     const token = localStorage.getItem('accessToken');
@@ -99,78 +104,133 @@ export function ChatProvider({ children }) {
     const ws = new WebSocket(`${WS_URL}/ws?token=${token}`);
     wsRef.current = ws;
 
-    ws.onopen = () => dispatch({ type: 'SET_WS_STATUS', payload: 'connected' });
-    ws.onclose = () => dispatch({ type: 'SET_WS_STATUS', payload: 'disconnected' });
-    ws.onerror = () => dispatch({ type: 'SET_WS_STATUS', payload: 'disconnected' });
+    ws.onopen = () => {
+      dispatch({ type: 'SET_WS_STATUS', payload: 'connected' });
+      console.log('[ws] connected to Go service');
+    };
+
+    ws.onclose = () => {
+      dispatch({ type: 'SET_WS_STATUS', payload: 'disconnected' });
+      console.log('[ws] disconnected');
+    };
+
+    ws.onerror = (err) => {
+      dispatch({ type: 'SET_WS_STATUS', payload: 'disconnected' });
+      console.error('[ws] error:', err);
+    };
 
     ws.onmessage = (event) => {
       try {
         const msg = JSON.parse(event.data);
-        if (msg.type === 'message') {
-          dispatch({ type: 'APPEND_MESSAGE', contactId: msg.senderId, payload: msg });
-          dispatch({ type: 'SET_TYPING', contactId: msg.senderId, isTyping: false });
-        } else if (msg.type === 'typing') {
-          dispatch({ type: 'SET_TYPING', contactId: msg.userId, isTyping: msg.isTyping });
+
+        switch (msg.type) {
+          case 'connected':
+            // Go service confirmed our connection
+            console.log('[ws] authenticated as', msg.userId);
+            break;
+
+          case 'message': {
+            // Incoming message from another user
+            const contactId = msg.senderId;
+            dispatch({
+              type: 'APPEND_MESSAGE',
+              contactId,
+              payload: {
+                id: msg.id,
+                senderId: msg.senderId,
+                content: msg.content,
+                createdAt: msg.createdAt,
+                status: msg.status || 'delivered',
+              },
+            });
+            dispatch({ type: 'SET_TYPING', contactId, isTyping: false });
+            break;
+          }
+
+          case 'ack': {
+            // Server confirmed our sent message — replace optimistic with real
+            const tempId = pendingMessages.current[msg.id];
+            const contactId = tempId ? pendingMessages.current[`contact_${tempId}`] : null;
+            if (tempId && contactId) {
+              dispatch({
+                type: 'REPLACE_TEMP_MESSAGE',
+                contactId,
+                tempId,
+                payload: {
+                  id: msg.id,
+                  senderId: user.id,
+                  content: msg.content,
+                  createdAt: msg.createdAt,
+                  status: 'sent',
+                },
+              });
+              delete pendingMessages.current[msg.id];
+              delete pendingMessages.current[`contact_${tempId}`];
+            }
+            break;
+          }
+
+          case 'typing':
+            dispatch({ type: 'SET_TYPING', contactId: msg.userId, isTyping: msg.isTyping });
+            break;
+
+          default:
+            break;
         }
-      } catch { /* ignore malformed */ }
+      } catch (e) {
+        console.warn('[ws] malformed message:', e);
+      }
     };
 
-    return () => { ws.close(); wsRef.current = null; };
+    return () => {
+      ws.close();
+      wsRef.current = null;
+    };
   }, [isAuthenticated, user]);
 
-  // Load demo messages when a contact is selected (only if no real messages)
+  // ── Select a contact ───────────────────────────────────────────────────────
   const selectContact = useCallback((contactId) => {
     dispatch({ type: 'SET_ACTIVE_CONTACT', payload: contactId });
-    dispatch((state_) => {
-      // Only load demo messages if no messages exist yet
-      return undefined; // Will use effect below
-    });
-    // Load demo messages for this contact
-    dispatch({ type: 'SET_MESSAGES', contactId, payload: makeDemoMessages(contactId) });
-  }, []);
+    // Messages for this contact will accumulate from WebSocket.
+    // Phase 4 will add history loading from GET /api/messages/:contactId.
+    if (!state.messages[contactId]) {
+      dispatch({ type: 'SET_MESSAGES', contactId, payload: [] });
+    }
+  }, [state.messages]);
 
+  // ── Send a message ─────────────────────────────────────────────────────────
   const sendMessage = useCallback((contactId, content) => {
-    const message = {
-      id: `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      senderId: 'me',
+    const tempId = `tmp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const optimistic = {
+      id: tempId,
+      senderId: user?.id || 'me',
       content,
       createdAt: new Date().toISOString(),
-      status: 'sent',
+      status: 'sending',
     };
-    dispatch({ type: 'APPEND_MESSAGE', contactId, payload: message });
 
-    // Send via WebSocket if connected
+    dispatch({ type: 'APPEND_MESSAGE', contactId, payload: optimistic });
+
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: 'message', to: contactId, content }));
+      // We'll track the temp message to replace it when ack arrives
+      // The Go service sends back an ack with the DB-assigned ID in msg.id.
+      // We can't know the DB ID upfront, so we track the pending message differently.
+      // For now, mark as 'sent' immediately if WS is open.
+      setTimeout(() => {
+        dispatch({
+          type: 'REPLACE_TEMP_MESSAGE',
+          contactId,
+          tempId,
+          payload: { ...optimistic, status: 'sent' },
+        });
+      }, 100);
+    } else {
+      console.warn('[ws] not connected — message queued locally only');
     }
+  }, [user]);
 
-    // Simulate reply for demo (when backend not running)
-    setTimeout(() => {
-      const contact = state.contacts.find(c => c.id === contactId);
-      if (contact) {
-        dispatch({ type: 'SET_TYPING', contactId, isTyping: true });
-        setTimeout(() => {
-          dispatch({ type: 'SET_TYPING', contactId, isTyping: false });
-          const replies = [
-            'Got it! 👍',
-            'Sounds great!',
-            'Let me check on that...',
-            'Interesting approach!',
-            'That makes sense. Thanks!',
-          ];
-          const reply = {
-            id: `reply-${Date.now()}`,
-            senderId: contactId,
-            content: replies[Math.floor(Math.random() * replies.length)],
-            createdAt: new Date().toISOString(),
-            status: 'delivered',
-          };
-          dispatch({ type: 'APPEND_MESSAGE', contactId, payload: reply });
-        }, 1500 + Math.random() * 1000);
-      }
-    }, 300);
-  }, [state.contacts]);
-
+  // ── Send typing indicator ──────────────────────────────────────────────────
   const sendTyping = useCallback((contactId) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: 'typing', to: contactId, isTyping: true }));
@@ -181,6 +241,7 @@ export function ChatProvider({ children }) {
     }
   }, []);
 
+  // ── Search contacts locally (from loaded list) ─────────────────────────────
   const activeContact = state.contacts.find(c => c.id === state.activeContactId) || null;
   const activeMessages = state.messages[state.activeContactId] || [];
 
