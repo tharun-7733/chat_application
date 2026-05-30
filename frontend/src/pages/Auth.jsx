@@ -145,12 +145,24 @@ export function RegisterPage() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (form.password !== form.confirm) {
-      setError('Passwords do not match.');
+    if (form.username.length < 3 || form.username.length > 50) {
+      setError('Username must be between 3 and 50 characters.');
       return;
     }
-    if (form.password.length < 6) {
-      setError('Password must be at least 6 characters.');
+    if (!/^[a-zA-Z0-9_-]+$/.test(form.username)) {
+      setError('Username can only contain letters, numbers, underscores, and hyphens.');
+      return;
+    }
+    if (form.password.length < 8) {
+      setError('Password must be at least 8 characters.');
+      return;
+    }
+    if (!/(?=.*[A-Z])(?=.*\d)/.test(form.password)) {
+      setError('Password must contain at least one uppercase letter and one digit.');
+      return;
+    }
+    if (form.password !== form.confirm) {
+      setError('Passwords do not match.');
       return;
     }
     setIsLoading(true);
@@ -160,7 +172,14 @@ export function RegisterPage() {
       toast('Account created! Welcome to NexChat 🚀', 'success');
       navigate('/chat');
     } catch (err) {
-      const msg = err.response?.data?.message || 'Registration failed. Please try again.';
+      let msg = err.response?.data?.message || 'Registration failed. Please try again.';
+      const fieldErrors = err.response?.data?.data;
+      if (fieldErrors && typeof fieldErrors === 'object') {
+        const errorList = Object.values(fieldErrors);
+        if (errorList.length > 0) {
+          msg = errorList.join('. ');
+        }
+      }
       setError(msg);
       toast(msg, 'error');
     } finally {
@@ -230,12 +249,12 @@ export function RegisterPage() {
               className="input-field"
               type={showPassword ? 'text' : 'password'}
               name="password"
-              placeholder="Minimum 6 characters"
+              placeholder="Min 8 chars, 1 uppercase, 1 digit"
               value={form.password}
               onChange={handleChange}
               autoComplete="new-password"
               required
-              minLength={6}
+              minLength={8}
               style={{ paddingRight: '44px' }}
             />
             <button

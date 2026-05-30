@@ -16,16 +16,6 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 public class NexChatApplication {
 
     public static void main(String[] args) {
-        /*
-         * SpringApplication.run() does 4 things in order:
-         * 1. Creates the ApplicationContext (the Spring IoC container)
-         * 2. Runs all auto-configuration classes
-         * 3. Runs component scanning and registers all beans
-         * 4. Starts the embedded Tomcat server on the configured port
-         *
-         * The returned ConfigurableApplicationContext can be used to
-         * programmatically access beans, but we don't need it here.
-         */
         SpringApplication.run(NexChatApplication.class, args);
     }
 }
