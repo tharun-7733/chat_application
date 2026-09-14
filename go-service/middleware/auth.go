@@ -19,7 +19,7 @@ type Claims struct {
 // ValidateJWT parses and validates a JWT token string.
 // Returns the userID (UUID string) extracted from the 'sub' claim.
 //
-// ⚠️ Must use the same secret and algorithm (HS256) as the Java JwtService.
+// Must use the same secret and algorithm (HS256) as the Java JwtService.
 func ValidateJWT(tokenStr, secret string) (string, error) {
 	// Strip "Bearer " prefix if present (some clients send it)
 	tokenStr = strings.TrimPrefix(tokenStr, "Bearer ")

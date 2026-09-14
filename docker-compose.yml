@@ -12,7 +12,7 @@
 #   Start one:    docker compose up -d postgres
 #   Logs:         docker compose logs -f java-service
 #   Stop all:     docker compose down
-#   Wipe volumes: docker compose down -v  (⚠️ destroys all data)
+#   Wipe volumes: docker compose down -v  (destroys all data)
 # =============================================================================
 
 version: '3.9'
@@ -103,7 +103,7 @@ services:
       JWT_ACCESS_EXPIRY: 900000     # 15 minutes
       JWT_REFRESH_EXPIRY: 604800000 # 7 days
       # Application settings
-      FRONTEND_URL: http://localhost:5173
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
       LOG_LEVEL: INFO
       SHOW_SQL: "false"
     depends_on:

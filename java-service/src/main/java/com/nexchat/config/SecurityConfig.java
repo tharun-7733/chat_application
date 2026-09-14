@@ -158,8 +158,8 @@ public class SecurityConfig {
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
 
-        // Allowed origins: only our React frontend
-        config.setAllowedOrigins(List.of(frontendUrl));
+        // Allowed origins: our React frontend (supports comma-separated list for multiple environments)
+        config.setAllowedOrigins(List.of(frontendUrl.split(",")));
 
         // HTTP methods the frontend is allowed to use
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
