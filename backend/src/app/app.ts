@@ -21,6 +21,7 @@ import { healthRoutes } from "../routes/health.routes.js";
 
 import { authRoutes } from "../routes/auth.routes.js";
 import { userRoutes } from "../routes/user.routes.js";
+import { friendRoutes } from "../routes/friend.routes.js";
 import { internalRoutes } from "../routes/internal.routes.js";
 
 
@@ -84,6 +85,7 @@ export async function buildApp(): Promise<FastifyInstance> {
 
   await app.register(authRoutes, { prefix: "/api/auth" });
   await app.register(userRoutes, { prefix: "/api/users" });
+  await app.register(friendRoutes, { prefix: "/api/friends" });
   await app.register(internalRoutes, { prefix: "/api/internal" });
   // ── 5. Startup hook: log all registered routes ───────────────────────────
   app.addHook("onReady", async () => {

@@ -4,7 +4,7 @@ export default defineConfig({
   test: {
     environment: "node",
     pool: "forks",
-    reporter: "verbose",
+    reporters: ["verbose"],
     include: ["tests/**/*.test.ts"],
     // Longer timeout for mongodb-memory-server (first run downloads binary)
     testTimeout: 30_000,
