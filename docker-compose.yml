@@ -20,38 +20,20 @@ version: '3.9'
 services:
 
   # ===========================================================================
-  # PostgreSQL — Relational Database
+  # MongoDB — NoSQL Database
   # ===========================================================================
-  postgres:
-    image: postgres:16-alpine
-    # alpine variant: ~80MB vs ~400MB for the full Debian image.
-    # Production-grade: PostgreSQL 16 is the current major version.
-    container_name: nexchat-postgres
+  mongodb:
+    image: mongo:7
+    container_name: nexchat-mongodb
     restart: unless-stopped
-    environment:
-      POSTGRES_DB: nexchat
-      POSTGRES_USER: nexchat_user
-      POSTGRES_PASSWORD: nexchat_pass
-      # Pre-create additional databases if needed (we don't need this now)
-      # POSTGRES_MULTIPLE_DATABASES: nexchat_test
-      PGDATA: /var/lib/postgresql/data/pgdata
     ports:
-      # host:container — exposes PostgreSQL on the host for local dev tools
-      # (e.g., TablePlus, pgAdmin, psql)
-      # ⚠️ In production, remove this port mapping — DB should not be
-      # accessible from outside the Docker network.
-      - "5432:5432"
+      - "27017:27017"
     volumes:
-      # Named volume: persists data across container restarts.
-      # Without this, all DB data is lost when the container stops.
-      - postgres_data:/var/lib/postgresql/data
+      - mongodb_data:/data/db
     networks:
       - nexchat-network
     healthcheck:
-      # pg_isready checks if PostgreSQL is accepting connections.
-      # The java-service depends_on this health check to avoid starting
-      # before the DB is ready to accept connections.
-      test: ["CMD-SHELL", "pg_isready -U nexchat_user -d nexchat"]
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
       interval: 10s
       timeout: 5s
       retries: 5
@@ -71,8 +53,6 @@ services:
     networks:
       - nexchat-network
     command: redis-server --appendonly yes
-    # appendonly yes: persistence mode — Redis snapshots data to disk.
-    # Default is RDB (snapshots), AOF is more durable (every write logged).
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -80,48 +60,40 @@ services:
       retries: 3
 
   # ===========================================================================
-  # Java Spring Boot Service — Auth + REST API
+  # Node.js Backend Service — Auth + REST API
   # ===========================================================================
-  java-service:
+  node-backend:
     build:
-      context: ./java-service
-      dockerfile: ../docker/java-service.Dockerfile
-    container_name: nexchat-java
+      context: ./backend
+      dockerfile: ../docker/node-service.Dockerfile
+    container_name: nexchat-node
     restart: unless-stopped
     ports:
       - "8080:8080"
     environment:
-      # Database connection
-      DB_HOST: postgres       # Resolves to the postgres container via Docker DNS
-      DB_PORT: 5432
-      DB_NAME: nexchat
-      DB_USERNAME: nexchat_user
-      DB_PASSWORD: nexchat_pass
+      # Database connections
+      MONGO_URI: mongodb://mongodb:27017/nexchat
+      REDIS_URL: redis://redis:6379
       # JWT configuration
-      # ⚠️ PRODUCTION: generate with: openssl rand -base64 64
       JWT_SECRET: nexchat-super-secret-key-replace-in-production-minimum-32-bytes
-      JWT_ACCESS_EXPIRY: 900000     # 15 minutes
-      JWT_REFRESH_EXPIRY: 604800000 # 7 days
+      # Internal service token
+      INTERNAL_SECRET: nexchat-internal-dev-secret
       # Application settings
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
-      LOG_LEVEL: INFO
-      SHOW_SQL: "false"
+      LOG_LEVEL: info
     depends_on:
-      postgres:
+      mongodb:
         condition: service_healthy
-        # condition: service_healthy means Docker waits for the healthcheck to pass.
-        # Without this, java-service starts immediately and fails because postgres
-        # isn't ready yet. This is the #1 Docker Compose beginner mistake.
+      redis:
+        condition: service_healthy
     networks:
       - nexchat-network
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8080/actuator/health || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/health || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 60s
-      # start_period: grace period before health checks begin.
-      # Spring Boot can take 30-60s to start — we give it 60s.
+      start_period: 20s
 
   # ===========================================================================
   # Go WebSocket Service — Real-time relay + Redis Pub/Sub
@@ -138,12 +110,12 @@ services:
       PORT: "8081"
       JWT_SECRET: nexchat-super-secret-key-replace-in-production-minimum-32-bytes
       REDIS_URL: redis:6379
-      JAVA_SERVICE_URL: http://java-service:8080
+      NODE_SERVICE_URL: http://node-backend:8080
       INTERNAL_SECRET: nexchat-internal-dev-secret
     depends_on:
       redis:
         condition: service_healthy
-      java-service:
+      node-backend:
         condition: service_healthy
     networks:
       - nexchat-network
@@ -184,7 +156,7 @@ networks:
 # Volumes
 # =============================================================================
 volumes:
-  postgres_data:
+  mongodb_data:
     driver: local
     # Named volumes persist beyond container lifecycle.
     # `docker compose down` removes containers but NOT volumes.

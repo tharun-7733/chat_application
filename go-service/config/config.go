@@ -19,9 +19,9 @@ type Config struct {
 	// RedisURL is the Redis connection string, e.g. "redis:6379" or "localhost:6379".
 	RedisURL string
 
-	// JavaServiceURL is the base URL for the Java REST API, e.g. "http://localhost:8080".
+	// NodeServiceURL is the base URL for the Node REST API, e.g. "http://localhost:8080".
 	// Used to call POST /internal/messages for message persistence.
-	JavaServiceURL string
+	NodeServiceURL string
 
 	// InternalSecret is a shared secret between Go and Java for internal API calls.
 	// Sent as X-Internal-Token header. Prevents external callers from injecting messages.
@@ -34,7 +34,7 @@ func Load() *Config {
 		Port:           getEnv("PORT", "8081"),
 		JWTSecret:      getEnv("JWT_SECRET", "dev-secret-key-minimum-32-bytes-long"),
 		RedisURL:       getEnv("REDIS_URL", "localhost:6379"),
-		JavaServiceURL: getEnv("JAVA_SERVICE_URL", "http://localhost:8080"),
+		NodeServiceURL: getEnv("NODE_SERVICE_URL", "http://localhost:8080"),
 		InternalSecret: getEnv("INTERNAL_SECRET", "nexchat-internal-dev-secret"),
 	}
 

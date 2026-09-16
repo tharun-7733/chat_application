@@ -1,87 +1,103 @@
 /**
  * NexChat — JWT Authentication Middleware
  *
- * Replaces: JwtAuthFilter.java (Spring Security OncePerRequestFilter)
- *           + UserDetailsServiceImpl.java
+ * Mirrors: com.nexchat.security.JwtAuthFilter
  *
- * Validates the Bearer token from the Authorization header, loads the user
- * from MongoDB, and attaches it to request.user.
+ * Fastify preHandler hook that:
+ *  1. Extracts the Bearer token from Authorization header
+ *  2. Verifies the JWT signature and expiry
+ *  3. Attaches { userId } to request.user
  *
- * Routes that require authentication register this as a preHandler hook.
- * Public routes (auth endpoints) do NOT register this hook.
+ * Usage — register on individual routes or route groups:
+ *   fastify.addHook('preHandler', requireAuth);
+ *   // or per-route:
+ *   { preHandler: [requireAuth] }
  *
- * JWT contract: MUST match the Java JwtService and Go middleware:
- *   - Algorithm:  HS256
- *   - sub:        UUID string (user._id)
- *   - type:       "ACCESS" (refresh tokens are rejected)
+ * On failure, sends the same ApiResponse envelope as all other errors:
+ *   { success: false, message: "...", data: null }
+ *
+ * ⚠️ SECURITY: We do NOT look up the user in MongoDB on every request
+ * (unlike the Java JwtAuthFilter which had a DB call via loadEmailByUserId).
+ * The JWT is self-contained — sub = userId. The DB lookup happens only in
+ * handlers that need the full user object. This reduces latency and DB load.
  */
 import type { FastifyRequest, FastifyReply } from "fastify";
-import jwt from "jsonwebtoken";
-import { config } from "../config/index.js";
-import { User, type IUser } from "../models/User.js";
-import { UnauthorizedError } from "../utils/errors.js";
+import { verifyAccessToken, JwtTokenExpiredError, JwtTokenInvalidError } from "../services/jwt.service.js";
+import { errorResponse } from "../utils/apiResponse.js";
+import { logger } from "../utils/logger.js";
 
-// ── TypeScript Augmentation ────────────────────────────────────────────────────
-// Declare request.user on FastifyRequest so handlers can access it without casting.
-declare module "fastify" {
-  interface FastifyRequest {
-    user?: IUser;
-  }
-}
+const BEARER_PREFIX = "Bearer ";
 
-// ── JWT Payload shape ─────────────────────────────────────────────────────────
-interface JwtPayload {
-  sub: string;   // User UUID
-  type: string;  // "ACCESS" | "REFRESH"
-  iat: number;
-  exp: number;
-}
-
-// ── Middleware ────────────────────────────────────────────────────────────────
-export async function jwtAuth(
-  request: FastifyRequest,
-  _reply: FastifyReply
-): Promise<void> {
+/**
+ * Extract raw JWT from "Authorization: Bearer <token>" header.
+ * Returns undefined if header is absent or malformed.
+ */
+function extractBearerToken(request: FastifyRequest): string | undefined {
   const authHeader = request.headers.authorization;
-  if (!authHeader?.startsWith("Bearer ")) {
-    throw new UnauthorizedError("Missing or malformed Authorization header");
+  if (!authHeader || !authHeader.startsWith(BEARER_PREFIX)) {
+    return undefined;
   }
+  return authHeader.slice(BEARER_PREFIX.length);
+}
 
-  const token = authHeader.slice(7).trim();
+/**
+ * Fastify preHandler: require a valid JWT access token.
+ * Attaches request.user = { userId } on success.
+ * Sends 401 on failure.
+ */
+export async function requireAuth(
+  request: FastifyRequest,
+  reply: FastifyReply
+): Promise<void> {
+  const raw = extractBearerToken(request);
 
-  let payload: JwtPayload;
-  try {
-    payload = jwt.verify(token, config.jwtSecret, {
-      algorithms: ["HS256"],
-    }) as JwtPayload;
-  } catch (err) {
-    if (err instanceof jwt.TokenExpiredError) {
-      throw new UnauthorizedError("Access token has expired");
-    }
-    throw new UnauthorizedError("Invalid access token");
-  }
-
-  // Reject refresh tokens — only ACCESS tokens are valid for API calls.
-  // (Go service does the same check.)
-  if (payload.type !== "ACCESS") {
-    throw new UnauthorizedError(
-      `Expected ACCESS token, received ${payload.type}`
+  if (!raw) {
+    return reply.code(401).send(
+      errorResponse("Authentication required. Please provide a valid token.")
     );
   }
 
-  const userId = payload.sub;
-  if (!userId) {
-    throw new UnauthorizedError("Token missing subject claim");
+  try {
+    const payload = verifyAccessToken(raw);
+    // Attach to request — available in all downstream handlers
+    (request as FastifyRequest & { user: { userId: string } }).user = {
+      userId: payload.sub,
+    };
+  } catch (err) {
+    if (err instanceof JwtTokenExpiredError) {
+      return reply.code(401).send(
+        errorResponse("Access token has expired. Please refresh your token.")
+      );
+    }
+    if (err instanceof JwtTokenInvalidError) {
+      logger.warn({ url: request.url }, "Invalid JWT rejected");
+      return reply.code(401).send(
+        errorResponse("Invalid token. Authentication required.")
+      );
+    }
+    // Unexpected error — let the global error handler catch it
+    throw err;
   }
+}
 
-  // Load user from MongoDB — this replaces UserDetailsServiceImpl.loadUserByEmail()
-  // In Java, the filter did an extra email lookup; here we use the UUID directly.
-  const user = await User.findById(userId).lean();
-  if (!user) {
-    // User deleted after token was issued
-    throw new UnauthorizedError("User associated with this token no longer exists");
+/**
+ * Fastify preHandler: optionally authenticate (does not block unauthenticated requests).
+ * Attaches request.user if a valid token is present, otherwise request.user is undefined.
+ * Useful for endpoints that customize their response for authenticated users.
+ */
+export async function optionalAuth(
+  request: FastifyRequest,
+  _reply: FastifyReply
+): Promise<void> {
+  const raw = extractBearerToken(request);
+  if (!raw) return;
+
+  try {
+    const payload = verifyAccessToken(raw);
+    (request as FastifyRequest & { user: { userId: string } }).user = {
+      userId: payload.sub,
+    };
+  } catch {
+    // Silently ignore — handler will treat user as unauthenticated
   }
-
-  // Attach to request — handlers access via request.user
-  request.user = user;
 }

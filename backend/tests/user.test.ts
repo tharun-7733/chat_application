@@ -188,7 +188,7 @@ describe("User Repository", () => {
     await UserRepo.createUser(makeUser({ username: "bob_jones" }));
     const [alice1] = await UserRepo.findAllUsersExcept("fake-id");
 
-    const results = await UserRepo.searchUsersByUsername("alice", alice1!._id);
+    const results = await UserRepo.searchUsersByUsername("alice", alice1!._id, 32);
     const usernames = results.map((u) => u.username.toLowerCase());
     expect(usernames.every((u) => u.includes("alice"))).toBe(true);
     expect(usernames).not.toContain("bob_jones");

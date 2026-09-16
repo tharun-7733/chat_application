@@ -12,5 +12,6 @@ export default defineConfig({
     // Run test files sequentially — each file manages its own DB lifecycle
     // (concurrent forks would race on the same in-memory server)
     fileParallelism: false,
+    setupFiles: ["./tests/setup.ts"],
   },
 });

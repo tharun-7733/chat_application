@@ -32,6 +32,7 @@ export async function createMessage(data: {
   content: string;
   messageType?: MessageType;
   sentAt?: Date;
+  isRead?: boolean;
 }): Promise<IMessage> {
   const msg = await Message.create({
     senderId: data.senderId,

@@ -7,7 +7,7 @@
 //   - Persist client (calls Java REST API)
 //   - HTTP server with /ws and /health routes
 //
-// Run: PORT=8081 JWT_SECRET=... REDIS_URL=localhost:6379 JAVA_SERVICE_URL=http://localhost:8080 go run ./...
+// Run: PORT=8081 JWT_SECRET=... REDIS_URL=localhost:6379 NODE_SERVICE_URL=http://localhost:8080 go run ./...
 package main
 
 import (
@@ -27,7 +27,7 @@ func main() {
 
 	// ── 1. Load configuration ────────────────────────────────────────────────
 	cfg := config.Load()
-	log.Printf("[config] Port=%s  Redis=%s  JavaURL=%s", cfg.Port, cfg.RedisURL, cfg.JavaServiceURL)
+	log.Printf("[config] Port=%s  Redis=%s  NodeURL=%s", cfg.Port, cfg.RedisURL, cfg.NodeServiceURL)
 
 	// ── 2. Connect to Redis ──────────────────────────────────────────────────
 	b, err := broker.New(cfg.RedisURL)
@@ -40,7 +40,7 @@ func main() {
 	go h.Run()
 
 	// ── 4. Create persistence client ────────────────────────────────────────
-	p := persist.New(cfg.JavaServiceURL, cfg.InternalSecret)
+	p := persist.New(cfg.NodeServiceURL, cfg.InternalSecret)
 
 	// ── 5. Register HTTP routes ──────────────────────────────────────────────
 	mux := http.NewServeMux()

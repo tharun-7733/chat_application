@@ -76,6 +76,16 @@ export const config = {
   // ── BCrypt ────────────────────────────────────────────────────────────────
   // MUST stay at 12 to match Java's BCryptPasswordEncoder(12).
   bcryptSaltRounds: optionalEnvInt("BCRYPT_SALT_ROUNDS", 12),
+
+  // ── Derived values (computed from above) ─────────────────────────────────
+  // jwt.service.ts uses milliseconds, so we derive from the second values.
+  get jwtAccessExpiryMs(): number {
+    return this.jwtAccessExpirySeconds * 1000;
+  },
+  get jwtRefreshExpiryMs(): number {
+    return this.jwtRefreshExpirySeconds * 1000;
+  },
 } as const;
+
 
 export type Config = typeof config;

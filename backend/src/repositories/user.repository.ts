@@ -144,7 +144,7 @@ export async function updateLastSeen(
  */
 export async function updateProfile(
   userId: string,
-  data: Partial<Pick<IUser, "avatarUrl" | "statusMessage">>
+  data: { avatarUrl?: string | undefined; statusMessage?: string | undefined }
 ): Promise<SafeUser | null> {
   const update: UpdateQuery<IUser> = { $set: {} };
   if (data.avatarUrl !== undefined)
@@ -191,7 +191,8 @@ export async function findAllUsersExcept(
  */
 export async function searchUsersByUsername(
   query: string,
-  excludeUserId: string
+  excludeUserId: string,
+  limit: number
 ): Promise<SafeUser[]> {
   return User.find(
     {

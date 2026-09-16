@@ -19,10 +19,10 @@ import { registerRateLimiter } from "../middleware/rateLimiter.js";
 import { registerErrorHandler } from "../middleware/errorHandler.js";
 import { healthRoutes } from "../routes/health.routes.js";
 
-// TODO: Phase 2 — import auth routes, user routes, internal routes
-// import { authRoutes }     from "../routes/auth.routes.js";
-// import { userRoutes }     from "../routes/user.routes.js";
-// import { internalRoutes } from "../routes/internal.routes.js";
+import { authRoutes } from "../routes/auth.routes.js";
+import { userRoutes } from "../routes/user.routes.js";
+import { internalRoutes } from "../routes/internal.routes.js";
+
 
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
@@ -82,11 +82,9 @@ export async function buildApp(): Promise<FastifyInstance> {
   // ── 4. Routes ─────────────────────────────────────────────────────────────
   await app.register(healthRoutes);
 
-  // TODO: Phase 2 — register auth, user, and internal routes
-  // await app.register(authRoutes,     { prefix: "/api/auth" });
-  // await app.register(userRoutes,     { prefix: "/api/users" });
-  // await app.register(internalRoutes, { prefix: "/api/internal" });
-
+  await app.register(authRoutes, { prefix: "/api/auth" });
+  await app.register(userRoutes, { prefix: "/api/users" });
+  await app.register(internalRoutes, { prefix: "/api/internal" });
   // ── 5. Startup hook: log all registered routes ───────────────────────────
   app.addHook("onReady", async () => {
     app.log.info("✅ All routes registered:");
