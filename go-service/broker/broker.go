@@ -43,7 +43,7 @@ func New(redisAddr string) (*Broker, error) {
 	defer cancel()
 
 	if err := rdb.Ping(ctx).Err(); err != nil {
-		return nil, fmt.Errorf("redis ping failed: %w", err)
+		log.Printf("[broker] warning: redis ping failed on startup, will keep trying in background: %v", err)
 	}
 
 	log.Printf("[broker] connected to Redis at %s", redisAddr)

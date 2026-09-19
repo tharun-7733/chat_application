@@ -136,15 +136,12 @@ func makeMessageHandler(h *hub.Hub, b *broker.Broker, chat *service.ChatService,
 
 			payload, _ := json.Marshal(outgoing)
 
-			// Try local delivery first (fastest path — no network hop)
-			delivered := h.Send(msg.To, payload)
-			if !delivered {
-				// Recipient is on a different instance — publish via Redis
-				pubCtx, pubCancel := context.WithTimeout(context.Background(), 2*time.Second)
-				defer pubCancel()
-				if err := b.Publish(pubCtx, msg.To, payload); err != nil {
-					log.Printf("[handler] Redis publish failed: %v", err)
-				}
+			// Publish to Redis for cross-instance and local delivery
+			pubCtx, pubCancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer pubCancel()
+			if err := b.Publish(pubCtx, msg.To, payload); err != nil {
+				log.Printf("[handler] Redis publish failed, falling back to local delivery: %v", err)
+				h.Send(msg.To, payload)
 			}
 
 			// Also echo back to sender with the DB-assigned ID and sentAt
@@ -172,12 +169,11 @@ func makeMessageHandler(h *hub.Hub, b *broker.Broker, chat *service.ChatService,
 			}
 			payload, _ := json.Marshal(typingMsg)
 
-			// Local delivery first
-			if !h.Send(msg.To, payload) {
-				// Cross-instance via Redis
-				pubCtx, pubCancel := context.WithTimeout(context.Background(), 1*time.Second)
-				defer pubCancel()
-				b.Publish(pubCtx, msg.To, payload)
+			// Cross-instance via Redis
+			pubCtx, pubCancel := context.WithTimeout(context.Background(), 1*time.Second)
+			defer pubCancel()
+			if err := b.Publish(pubCtx, msg.To, payload); err != nil {
+				h.Send(msg.To, payload)
 			}
 		}
 	}
