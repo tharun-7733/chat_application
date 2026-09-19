@@ -2,7 +2,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import {
   Search, Send, Phone, Video, Info, LogOut, MessageSquareText,
-  Plus, Smile, Paperclip, MoreVertical, Zap, Menu, X
+  Plus, Smile, Paperclip, MoreVertical, Zap, Menu, X, Bell
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useChat } from '../context/ChatContext';
@@ -10,6 +10,10 @@ import { useToast } from '../components/Toast';
 import Avatar from '../components/Avatar';
 import ContactItem from '../components/ContactItem';
 import MessageBubble, { TypingIndicator } from '../components/MessageBubble';
+import AddFriendModal from '../components/AddFriendModal';
+import FriendRequestsPanel from '../components/FriendRequestsPanel';
+import MyProfilePanel from '../components/MyProfilePanel';
+import ContactInfoPanel from '../components/ContactInfoPanel';
 import './Chat.css';
 
 export default function ChatPage() {
@@ -24,6 +28,9 @@ export default function ChatPage() {
   const [messageText, setMessageText] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [showProfile, setShowProfile] = useState(false);
+  const [showAddFriend, setShowAddFriend] = useState(false);
+  const [showRequests, setShowRequests] = useState(false);
+  const [showContactInfo, setShowContactInfo] = useState(false);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
   const typingTimerRef = useRef(null);
@@ -110,11 +117,16 @@ export default function ChatPage() {
         </div>
 
         {/* Section label */}
-        <div className="sidebar-section-label">
+        <div className="sidebar-section-label" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <span>Messages</span>
-          <button className="btn btn-ghost btn-sm">
-            <Plus size={13} /> New
-          </button>
+          <div style={{ display: 'flex', gap: '4px' }}>
+            <button className="btn btn-ghost btn-sm" title="Friend Requests" onClick={() => setShowRequests(true)} style={{ padding: '4px 8px' }}>
+              <Bell size={13} />
+            </button>
+            <button className="btn btn-ghost btn-sm" onClick={() => setShowAddFriend(true)}>
+              <Plus size={13} /> New
+            </button>
+          </div>
         </div>
 
         {/* Contact list */}
@@ -204,7 +216,7 @@ export default function ChatPage() {
                 <button className="btn-icon" aria-label="Video call" title="Video call">
                   <Video size={18} />
                 </button>
-                <button className="btn-icon" aria-label="Info" title="Contact info">
+                <button className="btn-icon" aria-label="Info" title="Contact info" onClick={() => setShowContactInfo(true)}>
                   <Info size={18} />
                 </button>
               </div>
@@ -285,6 +297,14 @@ export default function ChatPage() {
           </div>
         )}
       </main>
+
+      {/* ── Modals & Panels ── */}
+      {showAddFriend && <AddFriendModal onClose={() => setShowAddFriend(false)} />}
+      {showRequests && <FriendRequestsPanel onClose={() => setShowRequests(false)} />}
+      {showProfile && <MyProfilePanel onClose={() => setShowProfile(false)} />}
+      {showContactInfo && activeContact && (
+        <ContactInfoPanel contact={activeContact} onClose={() => setShowContactInfo(false)} />
+      )}
     </div>
   );
 }
