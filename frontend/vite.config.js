@@ -7,7 +7,12 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': {
-        target: 'http://localhost:8080',
+        target: 'http://localhost:8081', // Go service
+        changeOrigin: true,
+      },
+      '/ws': {
+        target: 'ws://localhost:8081',   // Go WebSocket
+        ws: true,
         changeOrigin: true,
       },
     },

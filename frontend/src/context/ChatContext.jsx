@@ -1,17 +1,18 @@
 // ChatContext — Real-time state for conversations, messages, presence
 // Manages the WebSocket connection lifecycle and message state.
-// Phase 3: Real contacts from API + live WebSocket relay via Go service.
+// Contacts are loaded from the friends list (GET /api/friends).
+// Message history is loaded from Go on contact select (GET /api/messages/:contactId).
 
 import { createContext, useContext, useReducer, useRef, useCallback, useEffect } from 'react';
 import { useAuth } from './AuthContext';
-import { userApi } from '../api/client';
+import { friendsApi, messagesApi, userApi } from '../api/client';
 
 const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:8081';
 
 const ChatContext = createContext(null);
 
 const initialState = {
-  contacts: [],             // Loaded from GET /api/users/search
+  contacts: [],             // Loaded from GET /api/friends
   messages: {},             // { contactId: Message[] }
   activeContactId: null,
   typingUsers: {},          // { contactId: boolean }
@@ -35,7 +36,7 @@ function chatReducer(state, action) {
       return { ...state, messages: { ...state.messages, [action.contactId]: action.payload } };
     case 'APPEND_MESSAGE': {
       const existing = state.messages[action.contactId] || [];
-      // Deduplicate: replace a temp message with the ack if IDs match
+      // Deduplicate: skip if a message with the same id already exists
       const withoutDup = existing.filter(m => m.id !== action.payload.id);
       return {
         ...state,
@@ -53,6 +54,13 @@ function chatReducer(state, action) {
       return { ...state, wsStatus: action.payload };
     case 'SET_SEARCH':
       return { ...state, searchQuery: action.payload };
+    case 'SET_CONTACT_ONLINE':
+      return {
+        ...state,
+        contacts: state.contacts.map(c =>
+          c.id === action.contactId ? { ...c, online: action.online } : c
+        ),
+      };
     default:
       return state;
   }
@@ -63,28 +71,42 @@ export function ChatProvider({ children }) {
   const { user, isAuthenticated } = useAuth();
   const wsRef = useRef(null);
   const typingTimerRef = useRef({});
-  // Map from tempId → contactId so we can replace optimistic messages on ack
   const pendingMessages = useRef({});
 
-  // ── Load contacts from API when authenticated ──────────────────────────────
+  // ── Load contacts (friends list) when authenticated ────────────────────────
   useEffect(() => {
     if (!isAuthenticated || !user) return;
 
     const loadContacts = async () => {
       dispatch({ type: 'SET_CONTACTS_LOADING', payload: true });
       try {
-        const { data } = await userApi.search('');
-        const contacts = (data.data || []).map(u => ({
-          id: u.id,
-          username: u.username,
-          email: u.email,
-          avatarUrl: u.avatarUrl || null,
-          statusMessage: u.statusMessage || null,
-          // Presence will be updated via WebSocket events
-          online: false,
-          lastSeen: u.lastSeen || null,
-        }));
-        dispatch({ type: 'SET_CONTACTS', payload: contacts });
+        // Fetch accepted friends from the Go service
+        const { data: friendsData } = await friendsApi.list();
+        const friendships = friendsData.data || [];
+
+        // For each friendship, resolve the "other" user's public profile.
+        const contactPromises = friendships.map(async (f) => {
+          const otherId = f.requesterId === user.id ? f.addresseeId : f.requesterId;
+          try {
+            const { data: userData } = await userApi.getById(otherId);
+            const u = userData.data;
+            return {
+              id: u.id,
+              username: u.username,
+              email: u.email || null,
+              avatarUrl: u.avatarUrl || null,
+              statusMessage: u.statusMessage || null,
+              online: false,
+              lastSeen: u.lastSeen || null,
+              friendshipId: f.id,
+            };
+          } catch {
+            return null;
+          }
+        });
+
+        const resolved = (await Promise.all(contactPromises)).filter(Boolean);
+        dispatch({ type: 'SET_CONTACTS', payload: resolved });
       } catch (err) {
         console.error('[chat] failed to load contacts:', err);
         dispatch({ type: 'SET_CONTACTS_ERROR', payload: 'Failed to load contacts' });
@@ -125,7 +147,6 @@ export function ChatProvider({ children }) {
 
         switch (msg.type) {
           case 'connected':
-            // Go service confirmed our connection
             console.log('[ws] authenticated as', msg.userId);
             break;
 
@@ -174,6 +195,14 @@ export function ChatProvider({ children }) {
             dispatch({ type: 'SET_TYPING', contactId: msg.userId, isTyping: msg.isTyping });
             break;
 
+          case 'online':
+            dispatch({ type: 'SET_CONTACT_ONLINE', contactId: msg.userId, online: true });
+            break;
+
+          case 'offline':
+            dispatch({ type: 'SET_CONTACT_ONLINE', contactId: msg.userId, online: false });
+            break;
+
           default:
             break;
         }
@@ -188,13 +217,26 @@ export function ChatProvider({ children }) {
     };
   }, [isAuthenticated, user]);
 
-  // ── Select a contact ───────────────────────────────────────────────────────
-  const selectContact = useCallback((contactId) => {
+  // ── Select a contact and load history ─────────────────────────────────────
+  const selectContact = useCallback(async (contactId) => {
     dispatch({ type: 'SET_ACTIVE_CONTACT', payload: contactId });
-    // Messages for this contact will accumulate from WebSocket.
-    // Phase 4 will add history loading from GET /api/messages/:contactId.
+
+    // Only fetch history if we haven't loaded messages for this contact yet
     if (!state.messages[contactId]) {
       dispatch({ type: 'SET_MESSAGES', contactId, payload: [] });
+      try {
+        const { data } = await messagesApi.history(contactId);
+        const msgs = (data.data || []).map(m => ({
+          id: m.id,
+          senderId: m.senderId,
+          content: m.content,
+          createdAt: m.createdAt,        // Go aliases sentAt → createdAt in JSON
+          status: m.isRead ? 'read' : 'delivered',
+        }));
+        dispatch({ type: 'SET_MESSAGES', contactId, payload: msgs });
+      } catch (err) {
+        console.error('[chat] failed to load message history:', err);
+      }
     }
   }, [state.messages]);
 
@@ -213,18 +255,15 @@ export function ChatProvider({ children }) {
 
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: 'message', to: contactId, content }));
-      // We'll track the temp message to replace it when ack arrives
-      // The Go service sends back an ack with the DB-assigned ID in msg.id.
-      // We can't know the DB ID upfront, so we track the pending message differently.
-      // For now, mark as 'sent' immediately if WS is open.
+      // Mark as sent after a brief delay (while waiting for real ack)
       setTimeout(() => {
         dispatch({
           type: 'REPLACE_TEMP_MESSAGE',
           contactId,
           tempId,
-          payload: { ...optimistic, status: 'sent' },
+          payload: { ...optimistic, id: tempId, status: 'sent' },
         });
-      }, 100);
+      }, 150);
     } else {
       console.warn('[ws] not connected — message queued locally only');
     }
@@ -241,7 +280,7 @@ export function ChatProvider({ children }) {
     }
   }, []);
 
-  // ── Search contacts locally (from loaded list) ─────────────────────────────
+  // ── Derived state ──────────────────────────────────────────────────────────
   const activeContact = state.contacts.find(c => c.id === state.activeContactId) || null;
   const activeMessages = state.messages[state.activeContactId] || [];
 

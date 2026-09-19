@@ -18,18 +18,19 @@ import (
 	"github.com/google/uuid"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 // Message mirrors the IMessage interface from the Node.js Message model.
 type Message struct {
 	// ID is a UUID string — matches Node.js uuidv4() default.
-	ID          string    `bson:"_id"`
-	SenderID    string    `bson:"senderId"`
-	ReceiverID  string    `bson:"receiverId"`
-	Content     string    `bson:"content"`
-	MessageType string    `bson:"messageType"`
-	IsRead      bool      `bson:"isRead"`
-	SentAt      time.Time `bson:"sentAt"`
+	ID          string    `bson:"_id"         json:"id"`
+	SenderID    string    `bson:"senderId"    json:"senderId"`
+	ReceiverID  string    `bson:"receiverId"  json:"receiverId"`
+	Content     string    `bson:"content"     json:"content"`
+	MessageType string    `bson:"messageType" json:"messageType"`
+	IsRead      bool      `bson:"isRead"      json:"isRead"`
+	SentAt      time.Time `bson:"sentAt"      json:"createdAt"` // alias sentAt as createdAt for frontend
 }
 
 // SavedMessage is the minimal result returned to the WebSocket handler
@@ -84,4 +85,33 @@ func (r *MessageRepository) Save(ctx context.Context, senderID, receiverID, cont
 		ID:     id,
 		SentAt: now,
 	}, nil
+}
+
+// FindConversation returns messages between two users, oldest first, limited to limit.
+func (r *MessageRepository) FindConversation(ctx context.Context, userA, userB string, limit int64) ([]Message, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+
+	filter := bson.M{
+		"$or": []bson.M{
+			{"senderId": userA, "receiverId": userB},
+			{"senderId": userB, "receiverId": userA},
+		},
+	}
+	opts := options.Find().
+		SetSort(bson.D{{Key: "sentAt", Value: 1}}).
+		SetLimit(limit)
+
+	cursor, err := r.coll.Find(ctx, filter, opts)
+	if err != nil {
+		return nil, fmt.Errorf("find conversation: %w", err)
+	}
+	defer cursor.Close(ctx)
+
+	var msgs []Message
+	if err = cursor.All(ctx, &msgs); err != nil {
+		return nil, fmt.Errorf("decode messages: %w", err)
+	}
+	return msgs, nil
 }

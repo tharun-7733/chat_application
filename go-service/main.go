@@ -77,22 +77,29 @@ func main() {
 	authH := handler.NewAuthHandler(authSvc)
 	userH := handler.NewUserHandler(userSvc)
 	friendH := handler.NewFriendHandler(friendSvc)
+	msgsH := handler.NewMessagesHandler(chatSvc)
 
 	// Auth routes (rate limited)
 	authLimiter := middleware.WSRateLimit(b.Client())
-	mux.Handle("POST /api/auth/register", authLimiter(http.HandlerFunc(authH.Register)))
-	mux.Handle("POST /api/auth/login", authLimiter(http.HandlerFunc(authH.Login)))
-	mux.HandleFunc("POST /api/auth/refresh", authH.Refresh)
-	mux.HandleFunc("POST /api/auth/logout", authH.Logout)
+	mux.Handle("POST /api/auth/register", authLimiter(bodylimit(http.HandlerFunc(authH.Register))))
+	mux.Handle("POST /api/auth/login", authLimiter(bodylimit(http.HandlerFunc(authH.Login))))
+	mux.Handle("POST /api/auth/refresh", bodylimit(http.HandlerFunc(authH.Refresh)))
+	mux.Handle("POST /api/auth/logout", bodylimit(http.HandlerFunc(authH.Logout)))
 
 	// Protected REST API routes
 	requireAuth := middleware.RequireAuth(cfg.JWTSecret)
+	// Users
 	mux.Handle("GET /api/users/me", requireAuth(http.HandlerFunc(userH.GetMe)))
+	mux.Handle("GET /api/users/search", requireAuth(http.HandlerFunc(userH.SearchUsers)))
+	mux.Handle("GET /api/users/{id}", requireAuth(http.HandlerFunc(userH.GetUserByID)))
+	// Friends
 	mux.Handle("GET /api/friends", requireAuth(http.HandlerFunc(friendH.GetFriends)))
 	mux.Handle("GET /api/friends/pending", requireAuth(http.HandlerFunc(friendH.GetPendingRequests)))
-	mux.Handle("POST /api/friends/requests", requireAuth(http.HandlerFunc(friendH.SendRequest)))
+	mux.Handle("POST /api/friends/requests", requireAuth(bodylimit(http.HandlerFunc(friendH.SendRequest))))
 	mux.Handle("PUT /api/friends/requests/{id}/accept", requireAuth(http.HandlerFunc(friendH.AcceptRequest)))
 	mux.Handle("DELETE /api/friends/requests/{id}/reject", requireAuth(http.HandlerFunc(friendH.RejectRequest)))
+	// Messages
+	mux.Handle("GET /api/messages/{contactId}", requireAuth(http.HandlerFunc(msgsH.GetHistory)))
 
 	// WebSocket upgrade endpoint — rate limited, then JWT authenticated
 	// Clients connect with: ws://localhost:8081/ws?token=<JWT>
@@ -154,6 +161,14 @@ func corsMiddleware(next http.Handler, allowedOrigins string) http.Handler {
 			return
 		}
 
+		next.ServeHTTP(w, r)
+	})
+}
+
+// bodylimit caps request bodies at 1 MB to prevent DoS from huge payloads.
+func bodylimit(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1 MB
 		next.ServeHTTP(w, r)
 	})
 }

@@ -44,3 +44,8 @@ func (s *ChatService) SaveMessage(ctx context.Context, senderID, receiverID, con
 		SentAt: saved.SentAt.UTC().Format("2006-01-02T15:04:05Z07:00"),
 	}, nil
 }
+
+// GetHistory returns conversation history between two users, oldest-first.
+func (s *ChatService) GetHistory(ctx context.Context, userA, userB string, limit int64) ([]repository.Message, error) {
+	return s.repo.FindConversation(ctx, userA, userB, limit)
+}
