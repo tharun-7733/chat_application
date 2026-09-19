@@ -15,6 +15,7 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"strings"
 
 	"github.com/nexchat/go-service/broker"
 	"github.com/nexchat/go-service/config"
@@ -45,7 +46,20 @@ func main() {
 	// ── 3. Build repository and service layer ─────────────────────────────────
 	database := mongoClient.Database(cfg.DBName)
 	msgRepo := repository.NewMessageRepository(database)
+	userRepo := repository.NewUserRepository(database)
+	sessionRepo, err := repository.NewSessionRepository(context.Background(), database)
+	if err != nil {
+		log.Fatalf("[main] failed to init session repo: %v", err)
+	}
+	friendRepo, err := repository.NewFriendRepository(context.Background(), database)
+	if err != nil {
+		log.Fatalf("[main] failed to init friend repo: %v", err)
+	}
+
 	chatSvc := service.NewChatService(msgRepo)
+	authSvc := service.NewAuthService(userRepo, sessionRepo, cfg.JWTSecret)
+	userSvc := service.NewUserService(userRepo)
+	friendSvc := service.NewFriendService(friendRepo)
 
 	// ── 4. Connect to Redis ──────────────────────────────────────────────────
 	b, err := broker.New(cfg.RedisURL)
@@ -59,6 +73,26 @@ func main() {
 
 	// ── 6. Register HTTP routes ──────────────────────────────────────────────
 	mux := http.NewServeMux()
+
+	authH := handler.NewAuthHandler(authSvc)
+	userH := handler.NewUserHandler(userSvc)
+	friendH := handler.NewFriendHandler(friendSvc)
+
+	// Auth routes (rate limited)
+	authLimiter := middleware.WSRateLimit(b.Client())
+	mux.Handle("POST /api/auth/register", authLimiter(http.HandlerFunc(authH.Register)))
+	mux.Handle("POST /api/auth/login", authLimiter(http.HandlerFunc(authH.Login)))
+	mux.HandleFunc("POST /api/auth/refresh", authH.Refresh)
+	mux.HandleFunc("POST /api/auth/logout", authH.Logout)
+
+	// Protected REST API routes
+	requireAuth := middleware.RequireAuth(cfg.JWTSecret)
+	mux.Handle("GET /api/users/me", requireAuth(http.HandlerFunc(userH.GetMe)))
+	mux.Handle("GET /api/friends", requireAuth(http.HandlerFunc(friendH.GetFriends)))
+	mux.Handle("GET /api/friends/pending", requireAuth(http.HandlerFunc(friendH.GetPendingRequests)))
+	mux.Handle("POST /api/friends/requests", requireAuth(http.HandlerFunc(friendH.SendRequest)))
+	mux.Handle("PUT /api/friends/requests/{id}/accept", requireAuth(http.HandlerFunc(friendH.AcceptRequest)))
+	mux.Handle("DELETE /api/friends/requests/{id}/reject", requireAuth(http.HandlerFunc(friendH.RejectRequest)))
 
 	// WebSocket upgrade endpoint — rate limited, then JWT authenticated
 	// Clients connect with: ws://localhost:8081/ws?token=<JWT>
@@ -75,14 +109,14 @@ func main() {
 	log.Printf("   WebSocket endpoint: ws://localhost%s/ws", addr)
 	log.Printf("   Health endpoint:    http://localhost%s/health", addr)
 
-	if err := http.ListenAndServe(addr, corsMiddleware(mux)); err != nil {
+	if err := http.ListenAndServe(addr, corsMiddleware(mux, cfg.AllowedOrigins)); err != nil {
 		log.Fatalf("[main] server failed: %v", err)
 	}
 }
 
 // corsMiddleware adds CORS headers to allow the React dev server to connect.
 // In production, restrict the Origin to your actual domain.
-func corsMiddleware(next http.Handler) http.Handler {
+func corsMiddleware(next http.Handler, allowedOrigins string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Secure headers
 		w.Header().Set("X-Content-Type-Options", "nosniff")
@@ -91,13 +125,29 @@ func corsMiddleware(next http.Handler) http.Handler {
 
 		// CORS configuration
 		origin := r.Header.Get("Origin")
-		if origin == "" {
-			origin = "*"
+		isAllowed := false
+
+		if allowedOrigins == "*" {
+			isAllowed = true
+		} else {
+			for _, allowed := range strings.Split(allowedOrigins, ",") {
+				if origin == strings.TrimSpace(allowed) || allowed == "*" {
+					isAllowed = true
+					break
+				}
+			}
 		}
-		w.Header().Set("Access-Control-Allow-Origin", origin)
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-		w.Header().Set("Access-Control-Allow-Credentials", "true")
+
+		if isAllowed {
+			if origin == "" {
+				w.Header().Set("Access-Control-Allow-Origin", "*")
+			} else {
+				w.Header().Set("Access-Control-Allow-Origin", origin)
+			}
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, DELETE")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
+		}
 
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
