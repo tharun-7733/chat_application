@@ -13,7 +13,7 @@ import (
 	"github.com/nexchat/go-service/broker"
 	"github.com/nexchat/go-service/hub"
 	"github.com/nexchat/go-service/middleware"
-	"github.com/nexchat/go-service/persist"
+	"github.com/nexchat/go-service/service"
 )
 
 // upgrader configures the WebSocket upgrade.
@@ -29,7 +29,7 @@ var upgrader = websocket.Upgrader{
 
 // WsHandler handles GET /ws?token=<JWT>
 // Upgrades the HTTP connection to WebSocket and wires up the client.
-func WsHandler(h *hub.Hub, b *broker.Broker, p *persist.Client, jwtSecret string) http.HandlerFunc {
+func WsHandler(h *hub.Hub, b *broker.Broker, chat *service.ChatService, jwtSecret string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// 1. Extract and validate JWT from query param or Authorization header
 		token := r.URL.Query().Get("token")
@@ -40,7 +40,7 @@ func WsHandler(h *hub.Hub, b *broker.Broker, p *persist.Client, jwtSecret string
 		userID, err := middleware.ValidateJWT(token, jwtSecret)
 		if err != nil {
 			log.Printf("[ws] auth failed: %v", err)
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			http.Error(w, `{"error":"Unauthorized","message":"Invalid or expired token"}`, http.StatusUnauthorized)
 			return
 		}
 
@@ -52,7 +52,7 @@ func WsHandler(h *hub.Hub, b *broker.Broker, p *persist.Client, jwtSecret string
 		}
 
 		// 3. Create Client with message handler wired to routing + persistence
-		client := hub.NewClient(h, conn, userID, makeMessageHandler(h, b, p, userID))
+		client := hub.NewClient(h, conn, userID, makeMessageHandler(h, b, chat, userID))
 
 		// 4. Register with hub
 		h.Register(client)
@@ -95,10 +95,10 @@ func WsHandler(h *hub.Hub, b *broker.Broker, p *persist.Client, jwtSecret string
 
 // makeMessageHandler returns the routing function called for each inbound frame.
 // This is where a client's message gets routed:
-//   - persisted via Java service
+//   - persisted directly to MongoDB via the chat service
 //   - delivered locally (if recipient connected on this instance)
 //   - or published to Redis (for cross-instance delivery)
-func makeMessageHandler(h *hub.Hub, b *broker.Broker, p *persist.Client, senderID string) hub.MessageHandler {
+func makeMessageHandler(h *hub.Hub, b *broker.Broker, chat *service.ChatService, senderID string) hub.MessageHandler {
 	return func(client *hub.Client, msg hub.IncomingMessage) {
 		switch msg.Type {
 
@@ -107,12 +107,12 @@ func makeMessageHandler(h *hub.Hub, b *broker.Broker, p *persist.Client, senderI
 				return
 			}
 
-			// Persist to PostgreSQL via Java service (async — don't block delivery)
+			// Persist directly to MongoDB (async — don't block delivery)
 			var msgID, sentAt string
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
 
-			saved, err := p.SaveMessage(ctx, senderID, msg.To, msg.Content)
+			saved, err := chat.SaveMessage(ctx, senderID, msg.To, msg.Content)
 			if err != nil {
 				// Persistence failed — still deliver the message (best-effort)
 				// In production: queue to a dead-letter topic for retry

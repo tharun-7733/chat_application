@@ -9,17 +9,17 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
-// Claims is the JWT payload structure (matches Java's JwtService).
+// Claims is the JWT payload structure (matches the Node.js jwt.service.ts).
 type Claims struct {
 	jwt.RegisteredClaims
-	// Type is the custom claim added by Java: "ACCESS" or "REFRESH"
+	// Type is the custom claim: "ACCESS" or "REFRESH"
 	Type string `json:"type"`
 }
 
 // ValidateJWT parses and validates a JWT token string.
 // Returns the userID (UUID string) extracted from the 'sub' claim.
 //
-// Must use the same secret and algorithm (HS256) as the Java JwtService.
+// Must use the same secret and algorithm (HS256) as the Node.js jwt.service.ts.
 func ValidateJWT(tokenStr, secret string) (string, error) {
 	// Strip "Bearer " prefix if present (some clients send it)
 	tokenStr = strings.TrimPrefix(tokenStr, "Bearer ")

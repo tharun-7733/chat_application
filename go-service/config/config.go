@@ -12,30 +12,29 @@ type Config struct {
 	// Port the HTTP server listens on (default: 8081)
 	Port string
 
-	// JWTSecret is the HMAC-SHA256 key shared with the Java service.
-	// MUST match nexchat.jwt.secret in Java's application.yml.
+	// JWTSecret is the HMAC-SHA256 key shared with the Node.js service.
+	// MUST match JWT_SECRET in the Node.js backend.
 	JWTSecret string
 
 	// RedisURL is the Redis connection string, e.g. "redis:6379" or "localhost:6379".
 	RedisURL string
 
-	// NodeServiceURL is the base URL for the Node REST API, e.g. "http://localhost:8080".
-	// Used to call POST /internal/messages for message persistence.
-	NodeServiceURL string
+	// MongoURI is the full MongoDB connection string.
+	// e.g. "mongodb://localhost:27017" or "mongodb://mongodb:27017"
+	MongoURI string
 
-	// InternalSecret is a shared secret between Go and Java for internal API calls.
-	// Sent as X-Internal-Token header. Prevents external callers from injecting messages.
-	InternalSecret string
+	// DBName is the MongoDB database name (default: "nexchat").
+	DBName string
 }
 
 // Load reads config from environment variables with sensible dev defaults.
 func Load() *Config {
 	cfg := &Config{
-		Port:           getEnv("PORT", "8081"),
-		JWTSecret:      getEnv("JWT_SECRET", "dev-secret-key-minimum-32-bytes-long"),
-		RedisURL:       getEnv("REDIS_URL", "localhost:6379"),
-		NodeServiceURL: getEnv("NODE_SERVICE_URL", "http://localhost:8080"),
-		InternalSecret: getEnv("INTERNAL_SECRET", "nexchat-internal-dev-secret"),
+		Port:      getEnv("PORT", "8081"),
+		JWTSecret: getEnv("JWT_SECRET", "dev-secret-key-minimum-32-bytes-long"),
+		RedisURL:  getEnv("REDIS_URL", "localhost:6379"),
+		MongoURI:  getEnv("MONGO_URI", "mongodb://localhost:27017"),
+		DBName:    getEnv("DB_NAME", "nexchat"),
 	}
 
 	// Warn but don't crash on missing critical secrets — this is a dev service.
