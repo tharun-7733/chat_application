@@ -14,8 +14,8 @@ import (
 )
 
 var (
-	// wsMaxConns is the max new WebSocket connections allowed per IP per window.
-	wsMaxConns int64 = 10
+	// wsMaxConns is the max new connections allowed per IP per window.
+	wsMaxConns int64 = 100
 	// wsWindow is the fixed window duration.
 	wsWindow = time.Minute
 )
