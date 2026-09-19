@@ -32,12 +32,21 @@ type Config struct {
 
 // Load reads config from environment variables with sensible dev defaults.
 func Load() *Config {
+	// Accept both MONGO_URI and MONGODB_URI for deployment flexibility
+	mongoURI := os.Getenv("MONGO_URI")
+	if mongoURI == "" {
+		mongoURI = os.Getenv("MONGODB_URI")
+	}
+	if mongoURI == "" {
+		mongoURI = "mongodb://localhost:27017"
+	}
+
 	cfg := &Config{
-		Port:      getEnv("PORT", "8081"),
-		JWTSecret: getEnv("JWT_SECRET", "dev-secret-key-minimum-32-bytes-long"),
-		RedisURL:  getEnv("REDIS_URL", "localhost:6379"),
-		MongoURI:  getEnv("MONGO_URI", "mongodb://localhost:27017"),
-		DBName:    getEnv("DB_NAME", "nexchat"),
+		Port:           getEnv("PORT", "8081"),
+		JWTSecret:      getEnv("JWT_SECRET", "dev-secret-key-minimum-32-bytes-long"),
+		RedisURL:       getEnv("REDIS_URL", "localhost:6379"),
+		MongoURI:       mongoURI,
+		DBName:         getEnv("DB_NAME", "nexchat"),
 		AllowedOrigins: getEnv("ALLOWED_ORIGINS", "http://localhost:5173,http://localhost:3000"),
 	}
 
