@@ -9,7 +9,7 @@
 # =============================================================================
 
 # ── Stage 1: Build ────────────────────────────────────────────────────────────
-FROM golang:1.24-alpine AS builder
+FROM golang:1.26-alpine AS builder
 
 # Install git (needed if go mod downloads from VCS) and ca-certificates
 RUN apk add --no-cache git ca-certificates
@@ -31,7 +31,7 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build \
     -ldflags="-w -s" \
     -o /bin/go-service \
-    ./...
+    .
 
 # ── Stage 2: Run ──────────────────────────────────────────────────────────────
 FROM alpine:3.20

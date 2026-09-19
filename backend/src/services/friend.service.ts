@@ -1,13 +1,10 @@
-import { UnderlyingByteSource } from "stream/web";
 import {
   sendFriendRequest,
   acceptFriendRequest as acceptRepoRequest,
   declineFriendRequest as declineRepoRequest,
   removeFriendship,
   findIncomingRequests,
-  findOutgoingRequests,
   findAcceptedFriends,
-  findFriendshipById,
   type IFriend,
   FriendshipStatus,
 } from "../repositories/friend.repository.js";

@@ -1,0 +1,48 @@
+services:
+  - type: web
+    name: nexchat-node
+    env: node
+    region: ohio
+    rootDir: backend
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: PORT
+        value: "8080"
+      - key: NODE_ENV
+        value: production
+      - key: JWT_SECRET
+        generateValue: true
+      - key: MONGO_URI
+        sync: false
+      - key: REDIS_URL
+        sync: false
+
+  - type: web
+    name: nexchat-go
+    env: go
+    region: ohio
+    rootDir: go-service
+    buildCommand: go build -o bin/server ./...
+    startCommand: ./bin/server
+    envVars:
+      - key: PORT
+        value: "8081"
+      - key: NODE_SERVICE_URL
+        fromService:
+          type: web
+          name: nexchat-node
+          envVarKey: RENDER_INTERNAL_HOSTNAME
+      - key: INTERNAL_SECRET
+        generateValue: true
+      - key: JWT_SECRET
+        fromService:
+          type: web
+          name: nexchat-node
+          envVarKey: JWT_SECRET
+      - key: MONGO_URI
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: ALLOWED_ORIGINS
+        sync: false # User will fill this in Render Dashboard with their Vercel URL

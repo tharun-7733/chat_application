@@ -54,7 +54,7 @@ services:
       - nexchat-network
     command: redis-server --appendonly yes
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: [ "CMD", "redis-cli", "ping" ]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -71,16 +71,16 @@ services:
     ports:
       - "8080:8080"
     environment:
-      # Database connections
-      MONGO_URI: mongodb://mongodb:27017/nexchat
-      REDIS_URL: redis://redis:6379
+      PORT: "8080"
+      NODE_ENV: production
+      MONGODB_URI: ${MONGODB_URI}
+      REDIS_URL: ${REDIS_URL}
       # JWT configuration
-      JWT_SECRET: nexchat-super-secret-key-replace-in-production-minimum-32-bytes
+      JWT_SECRET: ${JWT_SECRET:-nexchat-super-secret-key-replace-in-production-minimum-32-bytes}
       # Internal service token
-      INTERNAL_SECRET: nexchat-internal-dev-secret
+      INTERNAL_SECRET: ${INTERNAL_SECRET:-nexchat-internal-dev-secret}
       # Application settings
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
-      LOG_LEVEL: info
     depends_on:
       mongodb:
         condition: service_healthy
@@ -89,7 +89,7 @@ services:
     networks:
       - nexchat-network
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/health || exit 1"]
+      test: [ "CMD-SHELL", "wget -qO- http://127.0.0.1:8080/api/health || exit 1" ]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -108,24 +108,27 @@ services:
       - "8081:8081"
     environment:
       PORT: "8081"
-      JWT_SECRET: nexchat-super-secret-key-replace-in-production-minimum-32-bytes
-      REDIS_URL: redis:6379
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000}
+      JWT_SECRET: ${JWT_SECRET:-nexchat-super-secret-key-replace-in-production-minimum-32-bytes}
+      REDIS_URL: ${REDIS_URL}
+      MONGO_URI: ${MONGODB_URI}
       NODE_SERVICE_URL: http://node-backend:8080
-      INTERNAL_SECRET: nexchat-internal-dev-secret
+      INTERNAL_SECRET: ${INTERNAL_SECRET:-nexchat-internal-dev-secret}
     depends_on:
       redis:
+        condition: service_healthy
+      mongodb:
         condition: service_healthy
       node-backend:
         condition: service_healthy
     networks:
       - nexchat-network
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8081/health || exit 1"]
+      test: [ "CMD-SHELL", "wget -qO- http://localhost:8081/health || exit 1" ]
       interval: 15s
       timeout: 5s
       retries: 3
       start_period: 10s
-
   # ===========================================================================
   # Nginx Reverse Proxy (added in Phase 5)
   # ===========================================================================
@@ -142,9 +145,9 @@ services:
   #   networks:
   #     - nexchat-network
 
-# =============================================================================
-# Networks
-# =============================================================================
+  # =============================================================================
+  # Networks
+  # =============================================================================
 networks:
   nexchat-network:
     driver: bridge
@@ -152,9 +155,9 @@ networks:
     # container name (e.g., postgres, java-service). Perfect for a single-host setup.
     # For multi-host (Kubernetes, Docker Swarm), use overlay networks.
 
-# =============================================================================
-# Volumes
-# =============================================================================
+    # =============================================================================
+    # Volumes
+    # =============================================================================
 volumes:
   mongodb_data:
     driver: local

@@ -200,6 +200,6 @@ export async function searchUsersByUsername(
       _id: { $ne: excludeUserId },
     } as FilterQuery<IUser>,
     EXCLUDE_PASSWORD,
-    { sort: { username: 1 }, limit: 20 }
+    { sort: { username: 1 }, limit }
   ).lean<SafeUser[]>();
 }

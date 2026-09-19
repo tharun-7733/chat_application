@@ -35,7 +35,6 @@ import {
   existsByEmail,
   existsByUsername,
   findUserByEmailWithPassword,
-  findUserById,
   type SafeUser,
 } from "../repositories/user.repository.js";
 import {
