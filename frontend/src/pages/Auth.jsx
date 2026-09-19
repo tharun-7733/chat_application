@@ -2,10 +2,11 @@
 // Uses :user-valid / :user-invalid CSS pseudo-classes for field validation feedback.
 
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Mail, Lock, User, Eye, EyeOff, MessageSquareText, Zap } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/Toast';
+import { friendsApi } from '../api/client';
 import './Auth.css';
 
 // ──────────────────────────────────────────────
@@ -132,6 +133,8 @@ export function RegisterPage() {
   const { register } = useAuth();
   const toast = useToast();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const inviteId = searchParams.get('invite');
 
   const [form, setForm] = useState({ username: '', email: '', password: '', confirm: '' });
   const [showPassword, setShowPassword] = useState(false);
@@ -169,6 +172,16 @@ export function RegisterPage() {
     setError('');
     try {
       await register(form.username, form.email, form.password);
+      
+      // Auto-send friend request if invited
+      if (inviteId) {
+        try {
+          await friendsApi.sendRequest(inviteId);
+        } catch (err) {
+          console.error('Failed to auto-send friend request:', err);
+        }
+      }
+
       toast('Account created! Welcome to NexChat 🚀', 'success');
       navigate('/chat');
     } catch (err) {

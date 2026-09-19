@@ -4,9 +4,11 @@ import { X, Search, UserPlus, Loader, UserCheck } from 'lucide-react';
 import { userApi, friendsApi } from '../api/client';
 import Avatar from './Avatar';
 import { useToast } from './Toast';
+import { useAuth } from '../context/AuthContext';
 import './Modal.css';
 
 export default function AddFriendModal({ onClose }) {
+  const { user } = useAuth();
   const toast = useToast();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
@@ -50,6 +52,17 @@ export default function AddFriendModal({ onClose }) {
     }
   };
 
+  const handleInvite = () => {
+    const isEmail = query.includes('@');
+    const inviteLink = `https://chat-application-rho-one.vercel.app/register?invite=${user.id}`;
+    const subject = encodeURIComponent("Join me on NexChat!");
+    const body = encodeURIComponent(`Hey, I'm using NexChat. Create an account and let's chat!\n\nJoin here: ${inviteLink}`);
+    
+    // Open email client
+    window.location.href = `mailto:${isEmail ? query : ''}?subject=${subject}&body=${body}`;
+    toast('Opening email client...', 'success');
+  };
+
   // Close on Escape
   useEffect(() => {
     const handler = (e) => { if (e.key === 'Escape') onClose(); };
@@ -72,7 +85,7 @@ export default function AddFriendModal({ onClose }) {
               ref={inputRef}
               className="input-field search-input"
               type="search"
-              placeholder="Search by username..."
+              placeholder="Search by username or email..."
               value={query}
               onChange={e => handleSearch(e.target.value)}
               aria-label="Search users"
@@ -84,7 +97,12 @@ export default function AddFriendModal({ onClose }) {
               <div className="modal-state"><Loader size={20} className="spinning" /><span>Searching...</span></div>
             )}
             {!isSearching && query && results.length === 0 && (
-              <div className="modal-state"><span>No users found for "{query}"</span></div>
+              <div className="modal-state" style={{ flexDirection: 'column', gap: '1rem' }}>
+                <span>No users found for "{query}"</span>
+                <button className="btn btn-primary" onClick={handleInvite} style={{ padding: '0.5rem 1rem' }}>
+                  Invite via Email
+                </button>
+              </div>
             )}
             {!isSearching && !query && (
               <div className="modal-state muted">
