@@ -111,9 +111,9 @@ func (s *AuthService) generateTokens(ctx context.Context, user *repository.User)
 		return nil, fmt.Errorf("sign access token: %w", err)
 	}
 
-	// Generate Refresh Token (7d)
+	// Generate Refresh Token (30d)
 	refreshToken := uuid.New().String()
-	expiresAt := time.Now().Add(7 * 24 * time.Hour)
+	expiresAt := time.Now().Add(30 * 24 * time.Hour)
 	_, err = s.sessionRepo.Create(ctx, user.ID, refreshToken, expiresAt)
 	if err != nil {
 		return nil, err
