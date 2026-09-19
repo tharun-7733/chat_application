@@ -116,8 +116,11 @@ func (r *UserRepository) FindAll(ctx context.Context, excludeID string) ([]User,
 // SearchByUsername does a case-insensitive prefix/contains search.
 func (r *UserRepository) SearchByUsername(ctx context.Context, query, excludeID string) ([]User, error) {
 	filter := bson.M{
-		"_id":      bson.M{"$ne": excludeID},
-		"username": bson.M{"$regex": query, "$options": "i"},
+		"_id": bson.M{"$ne": excludeID},
+		"$or": []bson.M{
+			{"username": bson.M{"$regex": query, "$options": "i"}},
+			{"email": bson.M{"$regex": query, "$options": "i"}},
+		},
 	}
 	cursor, err := r.coll.Find(
 		ctx,
