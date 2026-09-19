@@ -62,8 +62,8 @@ func main() {
 
 	// WebSocket upgrade endpoint — rate limited, then JWT authenticated
 	// Clients connect with: ws://localhost:8081/ws?token=<JWT>
-	wsHandler := handler.WsHandler(h, b, chatSvc, cfg.JWTSecret)
-	mux.Handle("/ws", middleware.WSRateLimit(http.HandlerFunc(wsHandler)))
+	wsHandler := handler.WsHandler(h, b, chatSvc, cfg.JWTSecret, cfg.AllowedOrigins)
+	mux.Handle("/ws", middleware.WSRateLimit(b.Client())(http.HandlerFunc(wsHandler)))
 
 	// Health check
 	// curl http://localhost:8081/health
@@ -84,9 +84,20 @@ func main() {
 // In production, restrict the Origin to your actual domain.
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
+		// Secure headers
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+
+		// CORS configuration
+		origin := r.Header.Get("Origin")
+		if origin == "" {
+			origin = "*"
+		}
+		w.Header().Set("Access-Control-Allow-Origin", origin)
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		w.Header().Set("Access-Control-Allow-Credentials", "true")
 
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)

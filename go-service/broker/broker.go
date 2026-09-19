@@ -27,6 +27,11 @@ type Broker struct {
 	client *redis.Client
 }
 
+// Client returns the underlying Redis client for other uses, like rate limiting.
+func (b *Broker) Client() *redis.Client {
+	return b.client
+}
+
 // New connects to Redis and returns a Broker.
 // redisAddr is "host:port", e.g. "localhost:6379".
 func New(redisAddr string) (*Broker, error) {

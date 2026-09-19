@@ -1,65 +1,74 @@
 // Package middleware provides HTTP middleware for the Go WebSocket service.
 // This file implements a simple per-IP connection rate limiter for the /ws endpoint.
-//
-// Algorithm: sliding-window counter backed by a sync.Map.
-// For distributed rate limiting across multiple Go instances, swap
-// the in-memory map for a Redis INCR + EXPIRE approach.
 package middleware
 
 import (
+	"context"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
-	"sync"
 	"time"
+
+	"github.com/redis/go-redis/v9"
 )
 
-// wsEntry tracks the connection count and window start for a single IP.
-type wsEntry struct {
-	mu       sync.Mutex
-	count    int
-	windowAt time.Time
-}
-
 var (
-	wsLimiterMap sync.Map // IP string → *wsEntry
 	// wsMaxConns is the max new WebSocket connections allowed per IP per window.
-	wsMaxConns = 10
-	// wsWindow is the sliding window duration.
+	wsMaxConns int64 = 10
+	// wsWindow is the fixed window duration.
 	wsWindow = time.Minute
 )
 
 // WSRateLimit is an HTTP middleware that limits WebSocket upgrade attempts
 // per IP address. Returns 429 if the limit is exceeded.
-func WSRateLimit(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ip := clientIP(r)
+func WSRateLimit(rdb *redis.Client) func(next http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ip := clientIP(r)
 
-		val, _ := wsLimiterMap.LoadOrStore(ip, &wsEntry{windowAt: time.Now()})
-		entry := val.(*wsEntry)
+			// Simple fixed-window counter using INCR and EXPIRE.
+			// Key includes the window block, e.g. unix timestamp / 60
+			windowBlock := time.Now().Unix() / int64(wsWindow.Seconds())
+			key := fmt.Sprintf("ratelimit:ws:%s:%d", ip, windowBlock)
 
-		entry.mu.Lock()
-		now := time.Now()
-		if now.Sub(entry.windowAt) > wsWindow {
-			// New window — reset counter
-			entry.count = 0
-			entry.windowAt = now
-		}
-		entry.count++
-		count := entry.count
-		entry.mu.Unlock()
+			ctx, cancel := context.WithTimeout(r.Context(), 500*time.Millisecond)
+			defer cancel()
 
-		if count > wsMaxConns {
-			log.Printf("[ratelimit] WS rate limit exceeded for IP %s (%d/%d)", ip, count, wsMaxConns)
-			w.Header().Set("Content-Type", "application/json")
-			w.Header().Set("Retry-After", "60")
-			w.WriteHeader(http.StatusTooManyRequests)
-			w.Write([]byte(`{"error":"Too Many Requests","message":"WebSocket connection rate limit exceeded. Please try again in 60 seconds."}`))
-			return
-		}
+			pipe := rdb.Pipeline()
+			incr := pipe.Incr(ctx, key)
+			pipe.Expire(ctx, key, wsWindow*2) // keep around slightly longer than the window to handle edge cases
+			_, err := pipe.Exec(ctx)
 
-		next.ServeHTTP(w, r)
-	})
+			if err != nil {
+				// If Redis is down, we log and fail open (graceful degradation)
+				log.Printf("[ratelimit] warning: Redis failed, bypassing rate limit for %s: %v", ip, err)
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			count := incr.Val()
+
+			w.Header().Set("X-RateLimit-Limit", fmt.Sprintf("%d", wsMaxConns))
+			remaining := wsMaxConns - count
+			if remaining < 0 {
+				remaining = 0
+			}
+			w.Header().Set("X-RateLimit-Remaining", fmt.Sprintf("%d", remaining))
+			w.Header().Set("X-RateLimit-Reset", fmt.Sprintf("%d", (windowBlock+1)*int64(wsWindow.Seconds())))
+
+			if count > wsMaxConns {
+				log.Printf("[ratelimit] WS rate limit exceeded for IP %s (%d/%d)", ip, count, wsMaxConns)
+				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("Retry-After", fmt.Sprintf("%d", int64(wsWindow.Seconds())))
+				w.WriteHeader(http.StatusTooManyRequests)
+				w.Write([]byte(`{"error":"Too Many Requests","message":"Rate limit exceeded"}`))
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 // clientIP extracts the real client IP, honouring X-Forwarded-For for

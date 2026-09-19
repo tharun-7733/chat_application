@@ -25,6 +25,9 @@ type Config struct {
 
 	// DBName is the MongoDB database name (default: "nexchat").
 	DBName string
+
+	// AllowedOrigins restricts CORS and WebSocket origins. Comma-separated.
+	AllowedOrigins string
 }
 
 // Load reads config from environment variables with sensible dev defaults.
@@ -35,6 +38,7 @@ func Load() *Config {
 		RedisURL:  getEnv("REDIS_URL", "localhost:6379"),
 		MongoURI:  getEnv("MONGO_URI", "mongodb://localhost:27017"),
 		DBName:    getEnv("DB_NAME", "nexchat"),
+		AllowedOrigins: getEnv("ALLOWED_ORIGINS", "http://localhost:5173,http://localhost:3000"),
 	}
 
 	// Warn but don't crash on missing critical secrets — this is a dev service.

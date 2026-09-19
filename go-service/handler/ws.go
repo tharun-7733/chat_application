@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -16,20 +17,9 @@ import (
 	"github.com/nexchat/go-service/service"
 )
 
-// upgrader configures the WebSocket upgrade.
-// CheckOrigin returns true (allow all origins) for dev; restrict in production.
-var upgrader = websocket.Upgrader{
-	ReadBufferSize:  1024,
-	WriteBufferSize: 1024,
-	CheckOrigin: func(r *http.Request) bool {
-		// ⚠️ TODO PRODUCTION: validate r.Header.Get("Origin") against allowed list
-		return true
-	},
-}
-
 // WsHandler handles GET /ws?token=<JWT>
 // Upgrades the HTTP connection to WebSocket and wires up the client.
-func WsHandler(h *hub.Hub, b *broker.Broker, chat *service.ChatService, jwtSecret string) http.HandlerFunc {
+func WsHandler(h *hub.Hub, b *broker.Broker, chat *service.ChatService, jwtSecret string, allowedOrigins string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// 1. Extract and validate JWT from query param or Authorization header
 		token := r.URL.Query().Get("token")
@@ -40,11 +30,31 @@ func WsHandler(h *hub.Hub, b *broker.Broker, chat *service.ChatService, jwtSecre
 		userID, err := middleware.ValidateJWT(token, jwtSecret)
 		if err != nil {
 			log.Printf("[ws] auth failed: %v", err)
-			http.Error(w, `{"error":"Unauthorized","message":"Invalid or expired token"}`, http.StatusUnauthorized)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			w.Write([]byte(`{"error":"Unauthorized","message":"Invalid or expired token"}`))
 			return
 		}
 
-		// 2. Upgrade HTTP → WebSocket
+		// 2. Upgrade HTTP → WebSocket with secure origin checking
+		upgrader := websocket.Upgrader{
+			ReadBufferSize:  1024,
+			WriteBufferSize: 1024,
+			CheckOrigin: func(r *http.Request) bool {
+				origin := r.Header.Get("Origin")
+				if origin == "" {
+					return true // allow non-browser clients (like mobile apps)
+				}
+				for _, allowed := range strings.Split(allowedOrigins, ",") {
+					if origin == strings.TrimSpace(allowed) || allowed == "*" {
+						return true
+					}
+				}
+				log.Printf("[ws] Rejected origin: %s", origin)
+				return false
+			},
+		}
+
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
 			log.Printf("[ws] upgrade failed for user %s: %v", userID, err)
