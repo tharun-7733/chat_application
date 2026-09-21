@@ -13,6 +13,7 @@ const ChatContext = createContext(null);
 
 const initialState = {
   contacts: [],             // Loaded from GET /api/friends
+  pendingRequests: [],      // Loaded from GET /api/friends/pending
   messages: {},             // { contactId: Message[] }
   activeContactId: null,
   typingUsers: {},          // { contactId: boolean }
@@ -30,6 +31,8 @@ function chatReducer(state, action) {
       return { ...state, contactsLoading: action.payload };
     case 'SET_CONTACTS_ERROR':
       return { ...state, contactsError: action.payload, contactsLoading: false };
+    case 'SET_PENDING_REQUESTS':
+      return { ...state, pendingRequests: action.payload };
     case 'SET_ACTIVE_CONTACT':
       return { ...state, activeContactId: action.payload };
     case 'SET_MESSAGES':
@@ -73,48 +76,73 @@ export function ChatProvider({ children }) {
   const typingTimerRef = useRef({});
   const pendingMessages = useRef({});
 
-  // ── Load contacts (friends list) when authenticated ────────────────────────
+  // ── Load contacts (accepted friends) ──────────────────────────────────────
+  const loadContacts = useCallback(async () => {
+    if (!user) return;
+    dispatch({ type: 'SET_CONTACTS_LOADING', payload: true });
+    try {
+      const { data: friendsData } = await friendsApi.list();
+      const friendships = friendsData.data || [];
+
+      // For each friendship, resolve the "other" user's public profile.
+      const contactPromises = friendships.map(async (f) => {
+        const otherId = f.requesterId === user.id ? f.addresseeId : f.requesterId;
+        try {
+          const { data: userData } = await userApi.getById(otherId);
+          const u = userData.data;
+          return {
+            id: u.id,
+            username: u.username,
+            email: u.email || null,
+            avatarUrl: u.avatarUrl || null,
+            statusMessage: u.statusMessage || null,
+            online: false,
+            lastSeen: u.lastSeen || null,
+            friendshipId: f.id,
+          };
+        } catch {
+          return null;
+        }
+      });
+
+      const resolved = (await Promise.all(contactPromises)).filter(Boolean);
+      dispatch({ type: 'SET_CONTACTS', payload: resolved });
+    } catch (err) {
+      console.error('[chat] failed to load contacts:', err);
+      dispatch({ type: 'SET_CONTACTS_ERROR', payload: 'Failed to load contacts' });
+    }
+  }, [user]);
+
+  // ── Load pending friend requests (enriched with requester username) ────────
+  const loadPendingRequests = useCallback(async () => {
+    if (!user) return;
+    try {
+      const { data } = await friendsApi.pending();
+      const requests = data.data || [];
+
+      // Enrich each request with the requester's username
+      const enriched = await Promise.all(
+        requests.map(async (req) => {
+          try {
+            const { data: ud } = await userApi.getById(req.requesterId);
+            return { ...req, requesterUsername: ud.data?.username || req.requesterId };
+          } catch {
+            return { ...req, requesterUsername: req.requesterId };
+          }
+        })
+      );
+      dispatch({ type: 'SET_PENDING_REQUESTS', payload: enriched });
+    } catch (err) {
+      console.error('[chat] failed to load pending requests:', err);
+    }
+  }, [user]);
+
+  // ── Initial data load when authenticated ──────────────────────────────────
   useEffect(() => {
     if (!isAuthenticated || !user) return;
-
-    const loadContacts = async () => {
-      dispatch({ type: 'SET_CONTACTS_LOADING', payload: true });
-      try {
-        // Fetch accepted friends from the Go service
-        const { data: friendsData } = await friendsApi.list();
-        const friendships = friendsData.data || [];
-
-        // For each friendship, resolve the "other" user's public profile.
-        const contactPromises = friendships.map(async (f) => {
-          const otherId = f.requesterId === user.id ? f.addresseeId : f.requesterId;
-          try {
-            const { data: userData } = await userApi.getById(otherId);
-            const u = userData.data;
-            return {
-              id: u.id,
-              username: u.username,
-              email: u.email || null,
-              avatarUrl: u.avatarUrl || null,
-              statusMessage: u.statusMessage || null,
-              online: false,
-              lastSeen: u.lastSeen || null,
-              friendshipId: f.id,
-            };
-          } catch {
-            return null;
-          }
-        });
-
-        const resolved = (await Promise.all(contactPromises)).filter(Boolean);
-        dispatch({ type: 'SET_CONTACTS', payload: resolved });
-      } catch (err) {
-        console.error('[chat] failed to load contacts:', err);
-        dispatch({ type: 'SET_CONTACTS_ERROR', payload: 'Failed to load contacts' });
-      }
-    };
-
     loadContacts();
-  }, [isAuthenticated, user]);
+    loadPendingRequests();
+  }, [isAuthenticated, user, loadContacts, loadPendingRequests]);
 
   // ── Connect WebSocket when authenticated ───────────────────────────────────
   useEffect(() => {
@@ -240,6 +268,19 @@ export function ChatProvider({ children }) {
     }
   }, [state.messages]);
 
+  // ── Accept a friend request ────────────────────────────────────────────────
+  const acceptRequest = useCallback(async (friendId) => {
+    await friendsApi.acceptRequest(friendId);
+    // Reload both contacts and pending requests so the UI updates instantly
+    await Promise.all([loadContacts(), loadPendingRequests()]);
+  }, [loadContacts, loadPendingRequests]);
+
+  // ── Reject / decline a friend request ─────────────────────────────────────
+  const rejectRequest = useCallback(async (friendId) => {
+    await friendsApi.rejectRequest(friendId);
+    await loadPendingRequests();
+  }, [loadPendingRequests]);
+
   // ── Send a message ─────────────────────────────────────────────────────────
   const sendMessage = useCallback((contactId, content) => {
     const tempId = `tmp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
@@ -300,6 +341,9 @@ export function ChatProvider({ children }) {
       selectContact,
       sendMessage,
       sendTyping,
+      acceptRequest,
+      rejectRequest,
+      reloadContacts: loadContacts,
       setSearch: (q) => dispatch({ type: 'SET_SEARCH', payload: q }),
     }}>
       {children}

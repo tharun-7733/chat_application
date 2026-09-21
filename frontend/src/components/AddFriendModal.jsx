@@ -1,6 +1,6 @@
 // AddFriendModal — Search users and send friend requests
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { X, Search, UserPlus, Loader, UserCheck } from 'lucide-react';
+import { X, Search, UserPlus, Loader, UserCheck, Link } from 'lucide-react';
 import { userApi, friendsApi } from '../api/client';
 import Avatar from './Avatar';
 import { useToast } from './Toast';
@@ -63,6 +63,13 @@ export default function AddFriendModal({ onClose }) {
     toast('Opening email client...', 'success');
   };
 
+  const handleCopyLink = () => {
+    const inviteLink = `https://chat-application-rho-one.vercel.app/register?invite=${user.id}`;
+    navigator.clipboard.writeText(inviteLink)
+      .then(() => toast('Invite link copied to clipboard!', 'success'))
+      .catch(() => toast('Could not copy link.', 'error'));
+  };
+
   // Close on Escape
   useEffect(() => {
     const handler = (e) => { if (e.key === 'Escape') onClose(); };
@@ -97,10 +104,13 @@ export default function AddFriendModal({ onClose }) {
               <div className="modal-state"><Loader size={20} className="spinning" /><span>Searching...</span></div>
             )}
             {!isSearching && query && results.length === 0 && (
-              <div className="modal-state" style={{ flexDirection: 'column', gap: '1rem' }}>
+              <div className="modal-state" style={{ flexDirection: 'column', gap: '0.75rem' }}>
                 <span>No users found for "{query}"</span>
-                <button className="btn btn-primary" onClick={handleInvite} style={{ padding: '0.5rem 1rem' }}>
+                <button className="btn btn-primary" onClick={handleInvite} style={{ padding: '0.5rem 1rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                   Invite via Email
+                </button>
+                <button className="btn btn-ghost" onClick={handleCopyLink} style={{ padding: '0.5rem 1rem', display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem' }}>
+                  <Link size={14} /> Copy Invite Link
                 </button>
               </div>
             )}
